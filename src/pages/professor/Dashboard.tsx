@@ -213,7 +213,7 @@ export default function ProfessorDashboard() {
             <Button asChild className="bg-white text-[#1E5EFF] hover:bg-white/90 rounded-full px-6 font-bold shadow-sm h-11">
               <Link to="/professor/assignments/create">Create Assignment</Link>
             </Button>
-            <Button asChild variant="outline" className="text-white border-white/20 hover:bg-white/10 rounded-full px-6 font-bold backdrop-blur-sm h-11">
+            <Button asChild variant="outline" className="bg-white/10 text-white border-white/30 hover:bg-white/20 hover:text-white rounded-full px-6 font-bold backdrop-blur-sm h-11">
               <Link to="/professor/submissions">Review Submissions</Link>
             </Button>
           </div>
