@@ -11,6 +11,7 @@ import {
   Plus,
   Zap,
   BarChart3,
+  ShieldAlert,
   X
 } from "lucide-react"
 
@@ -52,6 +53,7 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
     { icon: LayoutDashboard, label: "Dashboard", href: "/professor/dashboard" },
     { icon: FileText, label: "Assignments", href: "/professor/assignments" },
     { icon: CheckSquare, label: "Submissions", href: "/professor/submissions" },
+    { icon: ShieldAlert, label: "Plagiarism Monitor", href: "/professor/plagiarism" },
     { icon: BarChart3, label: "Analytics", href: "/professor/analytics" },
     { icon: User, label: "Profile", href: "/professor/profile" },
   ]

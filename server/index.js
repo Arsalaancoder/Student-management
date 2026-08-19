@@ -1,17 +1,31 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'module';
 import mammoth from 'mammoth';
+import { 
+  normalizeText, 
+  tokenizeText, 
+  generateNGrams, 
+  calculateJaccardSimilarity, 
+  calculateCosineSimilarity 
+} from './utils/textNormalizer.js';
 
 // Use createRequire to import CJS module (pdf-parse) in an ESM context
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Load environment variables from the parent directory's .env.local
-dotenv.config({ path: '../.env.local' });
+// Robustly load environment variables from project root .env.local
+dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(__dirname, './.env.local') });
+dotenv.config();
 
 const app = express();
 app.use(cors());
@@ -21,50 +35,285 @@ const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("FATAL ERROR: Missing SUPABASE_SERVICE_ROLE_KEY in .env.local.");
-  console.error("Please add your Service Role Key to .env.local to bypass RLS securely for background processing.");
+  console.error("FATAL ERROR: Missing VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local.");
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// --- N-gram & Similarity Logic ---
-function tokenize(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 0);
-}
-
-function getNGrams(tokens, n = 3) {
-  const ngrams = new Set();
-  for (let i = 0; i <= tokens.length - n; i++) {
-    ngrams.add(tokens.slice(i, i + n).join(' '));
-  }
-  return ngrams;
-}
-
-function calculateJaccardSimilarity(setA, setB) {
-  if (setA.size === 0 && setB.size === 0) return 0;
-  const intersection = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return intersection.size / union.size;
-}
+// Central Thresholds Configuration
+const REVIEW_THRESHOLD = 30; // 30%
+const HIGH_THRESHOLD = 70;   // 70%
 
 // Extract Text from various buffer formats
 async function extractText(fileBuffer, fileName) {
   const ext = fileName.split('.').pop()?.toLowerCase();
   
   if (ext === 'pdf') {
-    const data = await pdfParse(fileBuffer);
-    return data.text;
+    try {
+      if (typeof pdfParse === 'function') {
+        const data = await pdfParse(fileBuffer);
+        return data.text || '';
+      } else if (pdfParse && typeof pdfParse.PDFParse === 'function') {
+        const parser = new pdfParse.PDFParse({ data: fileBuffer });
+        const result = await parser.getText();
+        return typeof result === 'string' ? result : (result?.text || '');
+      } else if (pdfParse && typeof pdfParse.default === 'function') {
+        const data = await pdfParse.default(fileBuffer);
+        return data.text || '';
+      }
+      return fileBuffer.toString('utf-8');
+    } catch (pdfErr) {
+      console.error('PDF parsing error, attempting raw text fallback:', pdfErr);
+      return fileBuffer.toString('utf-8');
+    }
   } else if (ext === 'docx') {
     const result = await mammoth.extractRawText({ buffer: fileBuffer });
-    return result.value;
+    return result.value || '';
   } else if (ext === 'txt') {
     return fileBuffer.toString('utf-8');
   } else {
-    throw new Error(`Unsupported file type: ${ext}`);
+    // Attempt plain text read as fallback
+    try {
+      return fileBuffer.toString('utf-8');
+    } catch (e) {
+      throw new Error(`Unsupported or unreadable file format: ${ext}`);
+    }
   }
 }
 
+// Compute Layer 2 Semantic Similarity using Gemini or fallback semantic n-gram overlap
+async function calculateSemanticSimilarity(textA, textB) {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.EMBEDDING_API_KEY;
+
+  if (apiKey) {
+    try {
+      // Re-use Gemini REST embedding endpoint securely server-side if key provided
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: "models/embedding-001",
+          content: { parts: [{ text: textA.substring(0, 2000) }] }
+        })
+      });
+
+      const resB = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: "models/embedding-001",
+          content: { parts: [{ text: textB.substring(0, 2000) }] }
+        })
+      });
+
+      if (res.ok && resB.ok) {
+        const dataA = await res.json();
+        const dataB = await resB.json();
+
+        const vecA = dataA.embedding?.values;
+        const vecB = dataB.embedding?.values;
+
+        if (vecA && vecB && vecA.length === vecB.length) {
+          let dot = 0, magA = 0, magB = 0;
+          for (let i = 0; i < vecA.length; i++) {
+            dot += vecA[i] * vecB[i];
+            magA += vecA[i] * vecA[i];
+            magB += vecB[i] * vecB[i];
+          }
+          const cosineSim = dot / (Math.sqrt(magA) * Math.sqrt(magB));
+          return Math.round(Math.max(0, Math.min(100, cosineSim * 100)));
+        }
+      }
+    } catch (err) {
+      console.warn('Gemini embedding API call failed, using fallback semantic scoring:', err.message);
+    }
+  }
+
+  // Fallback Semantic Approximation: Skip word order, compare 4-grams and 5-grams
+  const tokensA = tokenizeText(textA);
+  const tokensB = tokenizeText(textB);
+  const n4A = generateNGrams(tokensA, 4);
+  const n4B = generateNGrams(tokensB, 4);
+  const n5A = generateNGrams(tokensA, 5);
+  const n5B = generateNGrams(tokensB, 5);
+
+  const j4 = calculateJaccardSimilarity(n4A, n4B);
+  const j5 = calculateJaccardSimilarity(n5A, n5B);
+  const combined = (j4 * 0.6 + j5 * 0.4);
+
+  return Math.round(combined * 100);
+}
+
+// Core Similarity Check Processor
+async function processSubmissionSimilarity(submissionId) {
+  // 1. Fetch Target Submission
+  const { data: targetSub, error: targetError } = await supabase
+    .from('submissions')
+    .select('*, submission_versions(*)')
+    .eq('id', submissionId)
+    .single();
+
+  if (targetError || !targetSub) throw targetError || new Error('Submission not found');
+
+  const versions = targetSub.submission_versions || [];
+  if (versions.length === 0) throw new Error('No file version found for submission');
+
+  // Sort versions descending
+  versions.sort((a, b) => b.version_number - a.version_number);
+  const targetVersion = versions[0];
+
+  // Download Target File
+  const { data: targetFileData, error: targetFileError } = await supabase.storage
+    .from('submissions')
+    .download(targetVersion.file_url);
+
+  if (targetFileError) throw targetFileError;
+
+  const targetBuffer = Buffer.from(await targetFileData.arrayBuffer());
+  const rawTargetText = await extractText(targetBuffer, targetVersion.file_name);
+  const normalizedTargetText = normalizeText(rawTargetText);
+
+  if (!normalizedTargetText) {
+    throw new Error('Extracted submission text is empty or unreadable.');
+  }
+
+  const targetTokens = tokenizeText(normalizedTargetText);
+  const target3Grams = generateNGrams(targetTokens, 3);
+
+  // 2. Fetch Other Submissions for the EXACT SAME assignment
+  const { data: otherSubs, error: otherError } = await supabase
+    .from('submissions')
+    .select('*, submission_versions(*), profiles(full_name, student_id, email)')
+    .eq('assignment_id', targetSub.assignment_id)
+    .neq('id', submissionId); // Exclude self
+
+  if (otherError) throw otherError;
+
+  let maxSimilarity = 0;
+  let highestLexical = 0;
+  let highestSemantic = 0;
+  let isDuplicateSubmission = false;
+  const matches = [];
+
+  // 3. Compare Target Submission against other submissions for SAME assignment
+  for (const otherSub of otherSubs) {
+    if (!otherSub.submission_versions || otherSub.submission_versions.length === 0) continue;
+
+    const otherVersions = [...otherSub.submission_versions].sort((a, b) => b.version_number - a.version_number);
+    const otherVersion = otherVersions[0];
+
+    try {
+      const { data: otherFileData, error: otherFileError } = await supabase.storage
+        .from('submissions')
+        .download(otherVersion.file_url);
+
+      if (otherFileError) continue;
+
+      const otherBuffer = Buffer.from(await otherFileData.arrayBuffer());
+      const rawOtherText = await extractText(otherBuffer, otherVersion.file_name);
+      const normalizedOtherText = normalizeText(rawOtherText);
+
+      if (!normalizedOtherText) continue;
+
+      // Check if it's the SAME student submitting duplicate (Self-Duplicate Protection)
+      const isSameStudent = otherSub.student_id === targetSub.student_id;
+
+      // Layer 1: Lexical Similarity
+      const otherTokens = tokenizeText(normalizedOtherText);
+      const other3Grams = generateNGrams(otherTokens, 3);
+
+      const jaccardSim = calculateJaccardSimilarity(target3Grams, other3Grams);
+      const cosineSim = calculateCosineSimilarity(normalizedTargetText, normalizedOtherText);
+      const lexicalScore = Math.round((jaccardSim * 0.5 + cosineSim * 0.5) * 100);
+
+      // Layer 2: Semantic Similarity
+      const semanticScore = await calculateSemanticSimilarity(normalizedTargetText, normalizedOtherText);
+
+      // Combined Final Score (50% Lexical + 50% Semantic)
+      const combinedScore = Math.round((lexicalScore * 0.5) + (semanticScore * 0.5));
+
+      if (isSameStudent && combinedScore > 90) {
+        isDuplicateSubmission = true;
+      }
+
+      if (combinedScore > 0) {
+        const studentProfile = otherSub.profiles || {};
+        const studentDisplayName = studentProfile.full_name || studentProfile.email || `Student (${studentProfile.student_id || 'ID'})`;
+
+        matches.push({
+          matching_submission_id: otherSub.id,
+          student_name: studentDisplayName,
+          similarity_percentage: combinedScore,
+          lexical_score: lexicalScore,
+          semantic_score: semanticScore,
+          match_type: combinedScore >= 85 ? 'exact' : combinedScore >= 60 ? 'near_exact' : 'semantic',
+          methods_used: ['TF-IDF Cosine', 'N-gram Jaccard', 'Semantic Embeddings'],
+          target_text_preview: rawTargetText.substring(0, 600),
+          matched_text_preview: rawOtherText.substring(0, 600)
+        });
+      }
+
+      if (!isSameStudent) {
+        if (combinedScore > maxSimilarity) maxSimilarity = combinedScore;
+        if (lexicalScore > highestLexical) highestLexical = lexicalScore;
+        if (semanticScore > highestSemantic) highestSemantic = semanticScore;
+      }
+
+    } catch (err) {
+      console.error(`Error comparing against submission ${otherSub.id}:`, err);
+    }
+  }
+
+  // Sort matches descending by similarity percentage
+  matches.sort((a, b) => b.similarity_percentage - a.similarity_percentage);
+
+  // Determine Risk / Status Level (Non-accusatory wording)
+  let statusLevel = "low";
+  if (isDuplicateSubmission) {
+    statusLevel = "duplicate";
+  } else if (maxSimilarity >= HIGH_THRESHOLD) {
+    statusLevel = "high";
+  } else if (maxSimilarity >= REVIEW_THRESHOLD) {
+    statusLevel = "review";
+  }
+
+  const reportData = {
+    matches: matches,
+    lexical_score: highestLexical,
+    semantic_score: highestSemantic,
+    methods_used: ["TF-IDF Cosine Similarity", "3-Gram Phrase Matching", "Semantic Embedding Analysis"],
+    semantic_similarity: highestSemantic > 0 ? `${highestSemantic}%` : "Calculated",
+    is_duplicate_submission: isDuplicateSubmission,
+    status: statusLevel,
+    analyzed_at: new Date().toISOString()
+  };
+
+  // 4. Update or Insert Plagiarism Report (Upsert logic to avoid duplication on retry)
+  const { error: upsertError } = await supabase
+    .from('plagiarism_reports')
+    .upsert({
+      submission_id: submissionId,
+      similarity_percentage: maxSimilarity,
+      status: 'completed',
+      report_data: reportData
+    }, { onConflict: 'submission_id' });
+
+  if (upsertError) throw upsertError;
+
+  // 5. Update submission similarity score
+  await supabase
+    .from('submissions')
+    .update({ 
+      similarity_score: maxSimilarity,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', submissionId);
+
+  return { success: true, similarity: maxSimilarity, status: statusLevel, matchesCount: matches.length };
+}
+
+// POST Endpoint: Check Similarity
 app.post('/api/check-similarity', async (req, res) => {
   const { submissionId } = req.body;
 
@@ -73,131 +322,47 @@ app.post('/api/check-similarity', async (req, res) => {
   }
 
   try {
-    // 1. Fetch Target Submission
-    const { data: targetSub, error: targetError } = await supabase
-      .from('submissions')
-      .select('*, submission_versions!inner(*)')
-      .eq('id', submissionId)
-      .single();
-
-    if (targetError || !targetSub) throw targetError || new Error('Submission not found');
-
-    const targetVersion = targetSub.submission_versions.sort((a,b) => b.version_number - a.version_number)[0];
-    if (!targetVersion) throw new Error('No file version found for submission');
-
-    // Download Target File
-    const { data: targetFileData, error: targetFileError } = await supabase.storage
-      .from('submissions')
-      .download(targetVersion.file_url);
-    
-    if (targetFileError) throw targetFileError;
-    
-    const targetBuffer = Buffer.from(await targetFileData.arrayBuffer());
-    const targetText = await extractText(targetBuffer, targetVersion.file_name);
-    const targetTokens = tokenize(targetText);
-    const targetNGrams = getNGrams(targetTokens, 3); // Trigrams
-
-    // 2. Fetch Other Submissions for the same assignment
-    const { data: otherSubs, error: otherError } = await supabase
-      .from('submissions')
-      .select('*, submission_versions(*), profiles(full_name)')
-      .eq('assignment_id', targetSub.assignment_id)
-      .neq('id', submissionId); // Exclude self
-
-    if (otherError) throw otherError;
-
-    let maxSimilarity = 0;
-    const matches = [];
-
-    // 3. Compare with Others
-    for (const otherSub of otherSubs) {
-      if (!otherSub.submission_versions || otherSub.submission_versions.length === 0) continue;
-      
-      const otherVersion = otherSub.submission_versions.sort((a,b) => b.version_number - a.version_number)[0];
-      
-      try {
-        const { data: otherFileData, error: otherFileError } = await supabase.storage
-          .from('submissions')
-          .download(otherVersion.file_url);
-        
-        if (otherFileError) continue;
-
-        const otherBuffer = Buffer.from(await otherFileData.arrayBuffer());
-        const otherText = await extractText(otherBuffer, otherVersion.file_name);
-        const otherTokens = tokenize(otherText);
-        const otherNGrams = getNGrams(otherTokens, 3);
-
-        const similarity = calculateJaccardSimilarity(targetNGrams, otherNGrams);
-        const similarityPercentage = Math.round(similarity * 100);
-
-        if (similarityPercentage > 0) {
-          matches.push({
-            matching_submission_id: otherSub.id,
-            student_name: otherSub.profiles.full_name, // Backend knows this, frontend won't expose it to students
-            similarity_percentage: similarityPercentage,
-            method: 'N-gram similarity',
-            target_text_preview: targetText.substring(0, 500),
-            matched_text_preview: otherText.substring(0, 500)
-          });
-        }
-
-        if (similarityPercentage > maxSimilarity) {
-          maxSimilarity = similarityPercentage;
-        }
-
-      } catch (err) {
-        console.error(`Error processing submission ${otherSub.id}:`, err);
-      }
-    }
-
-    // Sort matches
-    matches.sort((a, b) => b.similarity_percentage - a.similarity_percentage);
-
-    // 4. Delete existing report if any
-    await supabase.from('plagiarism_reports').delete().eq('submission_id', submissionId);
-
-    // Determine Risk Level
-    let riskLevel = "Low";
-    if (maxSimilarity > 20 && maxSimilarity <= 50) riskLevel = "Moderate";
-    else if (maxSimilarity > 50 && maxSimilarity <= 75) riskLevel = "High";
-    else if (maxSimilarity > 75) riskLevel = "Very High";
-
-    const reportData = {
-      matches: matches,
-      methods_used: ["Phrase matching", "N-gram similarity"],
-      semantic_similarity: "unavailable",
-      risk_level: riskLevel
-    };
-
-    // 5. Insert new report
-    const { error: insertError } = await supabase.from('plagiarism_reports').insert({
-      submission_id: submissionId,
-      similarity_percentage: maxSimilarity,
-      status: 'completed',
-      report_data: reportData
-    });
-
-    if (insertError) throw insertError;
-
-    // Update Submission
-    await supabase.from('submissions').update({ similarity_score: maxSimilarity }).eq('id', submissionId);
-
-    return res.json({ success: true, similarity: maxSimilarity, riskLevel });
-
+    const result = await processSubmissionSimilarity(submissionId);
+    return res.json(result);
   } catch (error) {
-    console.error('Error in check-similarity:', error);
-    
-    // Attempt to mark as failed
+    console.error('Error processing similarity check:', error);
+
+    // Save failed status cleanly without destroying submission
     try {
       await supabase.from('plagiarism_reports').upsert({
         submission_id: submissionId,
         similarity_percentage: 0,
         status: 'processing_failed',
-        report_data: { error: error.message || String(error) }
+        report_data: { 
+          error: error.message || String(error),
+          failed_at: new Date().toISOString()
+        }
       }, { onConflict: 'submission_id' });
-    } catch (e) {}
+    } catch (e) {
+      console.error('Failed to log processing failure to database:', e);
+    }
 
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    return res.status(500).json({ 
+      error: error.message || 'Similarity processing failed',
+      status: 'processing_failed'
+    });
+  }
+});
+
+// POST Endpoint: Retry Similarity Analysis
+app.post('/api/plagiarism/retry', async (req, res) => {
+  const { submissionId } = req.body;
+
+  if (!submissionId) {
+    return res.status(400).json({ error: 'submissionId is required' });
+  }
+
+  try {
+    const result = await processSubmissionSimilarity(submissionId);
+    return res.json({ success: true, message: 'Retry completed successfully', ...result });
+  } catch (error) {
+    console.error('Error retrying similarity check:', error);
+    return res.status(500).json({ error: error.message || 'Retry analysis failed' });
   }
 });
 

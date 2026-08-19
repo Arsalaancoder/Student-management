@@ -5,8 +5,9 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, ArrowLeft, ShieldAlert, CheckCircle, Search, User } from "lucide-react"
+import { Loader2, ArrowLeft, ShieldAlert, CheckCircle, Search, User, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
+import { triggerPlagiarismRetry } from "@/lib/plagiarismApi"
 
 export default function SimilarityReport() {
   const { id } = useParams()
@@ -14,6 +15,7 @@ export default function SimilarityReport() {
   const { profile } = useAuth()
   
   const [loading, setLoading] = useState(true)
+  const [retrying, setRetrying] = useState(false)
   const [report, setReport] = useState<any>(null)
   const [submission, setSubmission] = useState<any>(null)
   const [selectedMatch, setSelectedMatch] = useState<any>(null)
@@ -154,6 +156,22 @@ export default function SimilarityReport() {
   const targetSection = tp.section ? `Section ${tp.section}` : "Not provided"
   const assignmentTitle = submission.assignments?.title || "Assignment"
 
+  const handleRetryReport = async () => {
+    if (!id) return
+    try {
+      setRetrying(true)
+      toast.info("Retrying similarity analysis...")
+      await triggerPlagiarismRetry(id)
+      toast.success("Analysis retried successfully!")
+      window.location.reload()
+    } catch (err: any) {
+      console.error("Retry error:", err)
+      toast.error(err.message || "Failed to retry analysis")
+    } finally {
+      setRetrying(false)
+    }
+  }
+
   if (status === "processing_failed") {
     return (
       <div className="text-center py-20 space-y-4">
@@ -162,7 +180,13 @@ export default function SimilarityReport() {
         <p className="text-red-600 bg-red-50 p-4 rounded-xl max-w-lg mx-auto border border-red-100 font-mono text-sm">
           {report_data?.error || "Unknown text extraction error."}
         </p>
-        <Button onClick={() => navigate(-1)} className="mt-4">Go Back</Button>
+        <div className="flex gap-3 justify-center mt-4">
+          <Button variant="outline" onClick={() => navigate(-1)}>Go Back</Button>
+          <Button onClick={handleRetryReport} disabled={retrying} className="bg-[#1E5EFF] font-bold">
+            {retrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            Retry Analysis
+          </Button>
+        </div>
       </div>
     )
   }
@@ -196,17 +220,23 @@ export default function SimilarityReport() {
           </div>
         </div>
 
-        <div className="flex gap-4 shrink-0">
-          <div className="px-6 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Similarity</span>
-            <span className={`text-2xl font-black ${similarity_percentage > 50 ? 'text-red-600' : similarity_percentage > 20 ? 'text-yellow-600' : 'text-green-600'}`}>
+        <div className="flex gap-3 shrink-0 items-center">
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Overall</span>
+            <span className={`text-xl font-black ${similarity_percentage >= 70 ? 'text-red-600' : similarity_percentage >= 30 ? 'text-amber-600' : 'text-emerald-600'}`}>
               {similarity_percentage}%
             </span>
           </div>
-          <div className="px-6 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Risk Level</span>
-            <span className={`text-lg font-black mt-0.5 ${report_data?.risk_level === 'High' || report_data?.risk_level === 'Very High' ? 'text-red-600' : report_data?.risk_level === 'Moderate' ? 'text-yellow-600' : 'text-green-600'}`}>
-              {report_data?.risk_level || "Unknown"}
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Lexical</span>
+            <span className="text-xl font-black text-slate-700">
+              {report_data?.lexical_score ?? selectedMatch?.lexical_score ?? '—'}%
+            </span>
+          </div>
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Semantic</span>
+            <span className="text-xl font-black text-indigo-600">
+              {report_data?.semantic_score ?? selectedMatch?.semantic_score ?? '—'}%
             </span>
           </div>
         </div>

@@ -36,6 +36,7 @@ import ProfessorAssignmentSubmissions from "./pages/professor/AssignmentSubmissi
 import ProfessorAllSubmissions from "./pages/professor/AllSubmissions"
 import ProfessorReviewSubmission from "./pages/professor/ReviewSubmission"
 import SimilarityReport from "./pages/professor/SimilarityReport"
+import PlagiarismMonitor from "./pages/professor/PlagiarismMonitor"
 import ProfessorProfile from "./pages/professor/Profile"
 import ProfessorAnalytics from "./pages/professor/Analytics"
 
@@ -87,6 +88,7 @@ function App() {
               <Route path="/professor/submissions" element={<ProfessorAllSubmissions />} />
               <Route path="/professor/submissions/:id/review" element={<ProfessorReviewSubmission />} />
               <Route path="/professor/submissions/:id/similarity" element={<SimilarityReport />} />
+              <Route path="/professor/plagiarism" element={<PlagiarismMonitor />} />
               {/* Other */}
               <Route path="/professor/analytics" element={<ProfessorAnalytics />} />
               <Route path="/professor/profile" element={<ProfessorProfile />} />

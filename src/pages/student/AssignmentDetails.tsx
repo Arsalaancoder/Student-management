@@ -13,6 +13,8 @@ import AIPanel from "@/components/ai/AIPanel"
 import { invokeAIAssistant } from "@/lib/ai"
 import { createNotification } from "@/lib/notifications"
 import { isAssignmentTargetedToStudent } from "@/lib/targeting"
+import { triggerSimilarityCheck } from "@/lib/plagiarismApi"
+import { PLAGIARISM_CONFIG } from "@/lib/plagiarismConfig"
 
 export default function AssignmentDetails() {
   const { id } = useParams()
@@ -335,12 +337,18 @@ export default function AssignmentDetails() {
       setSelectedFile(null)
       toast.success("Assignment submitted successfully!")
 
-      // Trigger similarity check in background
-      fetch('http://localhost:3001/api/check-similarity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submissionId: currentSubmissionId })
-      }).catch(err => console.error('Failed to trigger similarity check:', err))
+      // Trigger similarity check in background (non-blocking)
+      triggerSimilarityCheck(currentSubmissionId)
+        .then((res) => {
+          if (res?.similarity !== undefined) {
+            setSimilarityReport({
+              submission_id: currentSubmissionId,
+              similarity_percentage: res.similarity,
+              status: 'completed'
+            })
+          }
+        })
+        .catch(err => console.error('Background similarity check exception:', err))
 
     } catch (error: any) {
       console.error("Error submitting assignment:", error)
@@ -661,32 +669,48 @@ export default function AssignmentDetails() {
           </Card>
 
           {/* Student Similarity Report Widget */}
-          {similarityReport && similarityReport.status === 'completed' && (
+          {submission && (
             <Card className="border-none shadow-sm rounded-[2rem] bg-indigo-50 border border-indigo-100">
               <CardHeader className="pb-2">
                 <CardTitle className="text-indigo-900 text-lg flex items-center gap-2">
                   <ShieldAlert className="h-5 w-5 text-indigo-500" />
-                  Similarity Report
+                  Similarity Check
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-sm font-bold text-indigo-900 mb-1">
-                      <span>Originality Estimate</span>
-                      <span>{100 - similarityReport.similarity_percentage}%</span>
+                {!similarityReport || similarityReport.status === 'processing' ? (
+                  <div className="text-sm font-semibold text-indigo-800 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                    {PLAGIARISM_CONFIG.STUDENT_MESSAGES.PROCESSING}
+                  </div>
+                ) : similarityReport.status === 'processing_failed' ? (
+                  <div className="text-sm font-semibold text-slate-700">
+                    {PLAGIARISM_CONFIG.STUDENT_MESSAGES.FAILED}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="text-sm font-bold text-indigo-950">
+                      {similarityReport.similarity_percentage >= PLAGIARISM_CONFIG.HIGH_THRESHOLD
+                        ? PLAGIARISM_CONFIG.STUDENT_MESSAGES.HIGH
+                        : similarityReport.similarity_percentage >= PLAGIARISM_CONFIG.REVIEW_THRESHOLD
+                        ? PLAGIARISM_CONFIG.STUDENT_MESSAGES.REVIEW
+                        : PLAGIARISM_CONFIG.STUDENT_MESSAGES.LOW}
                     </div>
-                    <div className="h-2 w-full bg-indigo-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${100 - similarityReport.similarity_percentage}%` }} />
+
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-indigo-900 mb-1">
+                        <span>Originality Index</span>
+                        <span>{Math.max(0, 100 - similarityReport.similarity_percentage)}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-indigo-200 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-indigo-600 rounded-full transition-all duration-500" 
+                          style={{ width: `${Math.max(0, 100 - similarityReport.similarity_percentage)}%` }} 
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <div className="flex justify-between text-sm font-bold text-indigo-900/60 mb-1">
-                      <span>Potential Matching Content</span>
-                      <span>{similarityReport.similarity_percentage}%</span>
-                    </div>
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           )}
