@@ -45,7 +45,7 @@ export default function AssignmentSubmissions() {
         // Fetch Assignment Details
         const { data: assignData, error: assignError } = await supabase
           .from("assignments")
-          .select("title, max_marks, deadline, subjects(name)")
+          .select("title, max_marks, deadline, subject_name, subjects(name)")
           .eq("id", id)
           .single()
 
@@ -53,7 +53,7 @@ export default function AssignmentSubmissions() {
 
         setAssignment({
           title: assignData.title,
-          subjectName: (assignData.subjects as any)?.name || "Unknown Subject",
+          subjectName: assignData.subject_name || (assignData.subjects as any)?.name || "General",
           maxMarks: assignData.max_marks || 100,
           deadline: assignData.deadline
         })
@@ -66,21 +66,39 @@ export default function AssignmentSubmissions() {
             status,
             submitted_at,
             similarity_score,
-            profiles:student_id (full_name, student_id)
+            profiles:student_id (
+              full_name,
+              student_id,
+              department,
+              year,
+              section,
+              profile_photo_url
+            )
           `)
           .eq("assignment_id", id)
           .order("submitted_at", { ascending: false })
 
         if (subsError) throw subsError
 
-        const formatted = (subsData || []).map((s: any) => ({
-          id: s.id,
-          studentName: s.profiles?.full_name || "Unknown Student",
-          studentId: s.profiles?.student_id || "N/A",
-          status: s.status || "submitted",
-          submittedAt: s.submitted_at,
-          similarityScore: s.similarity_score
-        }))
+        const formatted = (subsData || []).map((s: any) => {
+          const p = s.profiles || {}
+          const name = p.full_name || p.email || (p.student_id ? `Student (${p.student_id})` : "Student Profile")
+          return {
+            id: s.id,
+            studentName: name,
+            studentId: p.student_id || "N/A",
+            department: p.department || "Not provided",
+            rawDepartment: p.department,
+            year: p.year ? `${p.year}${p.year === 1 ? 'st' : p.year === 2 ? 'nd' : p.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
+            rawYear: p.year,
+            section: p.section ? `Section ${p.section}` : "Not provided",
+            rawSection: p.section,
+            profilePhoto: p.profile_photo_url || null,
+            status: s.status || "submitted",
+            submittedAt: s.submitted_at,
+            similarityScore: s.similarity_score
+          }
+        })
 
         setSubmissions(formatted)
 
@@ -96,7 +114,8 @@ export default function AssignmentSubmissions() {
 
   const filteredSubmissions = submissions.filter(s => 
     s.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    s.studentId.toLowerCase().includes(searchQuery.toLowerCase())
+    s.studentId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.department.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const [classSummaryContent, setClassSummaryContent] = useState<string | null>(null)
@@ -202,17 +221,29 @@ export default function AssignmentSubmissions() {
                 const needsReview = sub.status === "submitted"
                 
                 return (
-                  <div key={sub.id} className="flex flex-col md:flex-row md:items-center justify-between p-6 hover:bg-slate-50 transition-colors group">
-                    <div className="flex items-center gap-5">
-                      <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">
-                        {sub.studentName.charAt(0)}
+                  <div key={sub.id} className="flex flex-col lg:flex-row lg:items-center justify-between p-6 hover:bg-slate-50 transition-colors gap-4 group">
+                    <div className="flex items-start sm:items-center gap-4 min-w-0">
+                      <div className="h-14 w-14 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg flex-shrink-0 overflow-hidden border border-slate-100">
+                        {sub.profilePhoto ? (
+                          <img src={sub.profilePhoto} alt={sub.studentName} className="h-full w-full object-cover" />
+                        ) : (
+                          <span>{sub.studentName.charAt(0)}</span>
+                        )}
                       </div>
-                      <div>
-                        <h4 className="font-bold text-[#0B1E43] text-lg">{sub.studentName}</h4>
-                        <div className="flex items-center gap-3 text-sm mt-0.5">
-                          <span className="text-muted-foreground font-medium">ID: {sub.studentId}</span>
-                          <span className="text-muted-foreground">&bull;</span>
-                          <span className="text-muted-foreground">Submitted {new Date(sub.submittedAt).toLocaleDateString()}</span>
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-[#0B1E43] text-lg leading-snug truncate">{sub.studentName}</h4>
+                          <span className="px-2.5 py-0.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg uppercase tracking-wider">ID: {sub.studentId}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground flex-wrap">
+                          <span className="text-slate-700 font-semibold">{sub.department}</span>
+                          <span>&bull;</span>
+                          <span>{sub.year}</span>
+                          <span>&bull;</span>
+                          <span>{sub.section}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground pt-0.5">
+                          Submitted on {new Date(sub.submittedAt).toLocaleDateString()}
                         </div>
                       </div>
                     </div>

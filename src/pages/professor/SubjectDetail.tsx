@@ -69,7 +69,7 @@ export default function ProfessorSubjectDetail() {
       // Fetch assignments for this subject
       const { data: assignmentsData } = await supabase
         .from("assignments")
-        .select("id, title, description, deadline, max_marks, max_credits, created_at")
+        .select("id, title, description, deadline, max_marks, max_credits, target_year, created_at")
         .eq("subject_id", subjectId)
         .order("created_at", { ascending: false })
 
@@ -147,7 +147,22 @@ export default function ProfessorSubjectDetail() {
         <CardHeader className="p-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg tracking-wider">{subject.code}</span>
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg tracking-wider">
+                  Code: {subject.code}
+                </span>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-7 text-xs rounded-lg font-bold border-blue-200 text-blue-600 hover:bg-blue-50"
+                  onClick={() => {
+                    navigator.clipboard.writeText(subject.code)
+                    toast.success("Subject code copied to clipboard! Share this with your students so they can enroll.")
+                  }}
+                >
+                  Copy Code for Students
+                </Button>
+              </div>
               <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43] mt-3">{subject.name}</h1>
               {subject.description && (
                 <p className="text-muted-foreground mt-2 max-w-2xl">{subject.description}</p>
@@ -223,6 +238,11 @@ export default function ProfessorSubjectDetail() {
                           <p className="text-sm text-muted-foreground line-clamp-1">{assignment.description}</p>
                         )}
                         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                          {assignment.target_year && (
+                            <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-lg">
+                              For: {assignment.target_year === 1 ? '1st Year' : assignment.target_year === 2 ? '2nd Year' : assignment.target_year === 3 ? '3rd Year' : assignment.target_year === 4 ? '4th Year' : `${assignment.target_year}th Year`}
+                            </span>
+                          )}
                           <span className="flex items-center gap-1.5">
                             <Calendar className="h-3.5 w-3.5" />
                             Due {new Date(assignment.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}

@@ -69,8 +69,15 @@ export default function ReviewSubmission() {
             similarity_score,
             assignment_id,
             return_reason,
-            profiles:student_id (full_name, student_id, profile_photo_url),
-            assignments (title, max_marks, max_credits, rubric),
+            profiles:student_id (
+              full_name,
+              student_id,
+              department,
+              year,
+              section,
+              profile_photo_url
+            ),
+            assignments (title, max_marks, max_credits, rubric, subject_name, subjects (name)),
             submission_versions (file_url, file_name, version_number)
           `)
           .eq("id", id)
@@ -94,17 +101,23 @@ export default function ReviewSubmission() {
           .from("plagiarism_reports")
           .select("*")
           .eq("submission_id", id)
-          .single()
+          .maybeSingle()
+
+        const p = (subData.profiles as any) || {}
+        const studentName = p.full_name || p.email || (p.student_id ? `Student (${p.student_id})` : "Not provided")
 
         setData({
           submissionId: subData.id,
           status: subData.status || "submitted",
           submittedAt: subData.submitted_at,
           similarityScore: subData.similarity_score,
-          studentName: (subData.profiles as any)?.full_name || "Unknown Student",
-          studentId: (subData.profiles as any)?.student_id || "N/A",
-          profilePhoto: (subData.profiles as any)?.profile_photo_url,
-          assignmentTitle: (subData.assignments as any)?.title || "Unknown Assignment",
+          studentName,
+          studentId: p.student_id || "Not provided",
+          department: p.department || "Not provided",
+          year: p.year ? `${p.year}${p.year === 1 ? 'st' : p.year === 2 ? 'nd' : p.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
+          section: p.section ? `Section ${p.section}` : "Not provided",
+          profilePhoto: p.profile_photo_url || null,
+          assignmentTitle: (subData.assignments as any)?.title || "Assignment",
           assignmentId: subData.assignment_id || "",
           maxMarks: (subData.assignments as any)?.max_marks || 100,
           maxCredits: (subData.assignments as any)?.max_credits || 0,
@@ -121,7 +134,7 @@ export default function ReviewSubmission() {
           .from("grades")
           .select("marks, credits, feedback, is_draft, rubric_scores")
           .eq("submission_id", id)
-          .single()
+          .maybeSingle()
 
         if (gradeData) {
           setData(prev => prev ? { ...prev, is_draft: !!gradeData.is_draft } : prev)
@@ -343,7 +356,7 @@ export default function ReviewSubmission() {
           
           <Card className="border-none shadow-sm rounded-[2rem] bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100">
             <CardContent className="p-8">
-              <div className="flex items-center gap-6">
+              <div className="flex items-start sm:items-center gap-6">
                 <div className="h-20 w-20 rounded-full bg-white shadow-sm flex items-center justify-center border-4 border-white overflow-hidden shrink-0">
                   {data.profilePhoto ? (
                     <img src={data.profilePhoto} alt={data.studentName} className="h-full w-full object-cover" />
@@ -351,12 +364,17 @@ export default function ReviewSubmission() {
                     <span className="text-3xl font-black text-blue-500">{data.studentName.charAt(0)}</span>
                   )}
                 </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-[#0B1E43]">{data.studentName}</h2>
-                  <div className="flex items-center gap-3 mt-1 flex-wrap">
-                    <span className="px-2 py-1 bg-white/60 text-slate-700 text-xs font-bold rounded-lg tracking-wider uppercase">ID: {data.studentId}</span>
-                    <span className="text-xs font-medium text-slate-500">Submitted on {new Date(data.submittedAt).toLocaleString()}</span>
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <h2 className="text-2xl font-bold text-[#0B1E43] leading-snug">{data.studentName}</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-1 bg-white/80 text-slate-700 text-xs font-bold rounded-lg uppercase tracking-wider shadow-2xs">ID: {data.studentId}</span>
+                    <span className="px-2.5 py-1 bg-white/80 text-slate-700 text-xs font-bold rounded-lg shadow-2xs">{data.department}</span>
+                    <span className="px-2.5 py-1 bg-white/80 text-slate-700 text-xs font-bold rounded-lg shadow-2xs">{data.year}</span>
+                    <span className="px-2.5 py-1 bg-white/80 text-slate-700 text-xs font-bold rounded-lg shadow-2xs">{data.section}</span>
                   </div>
+                  <p className="text-xs font-medium text-slate-500 pt-1">
+                    Submitted on {new Date(data.submittedAt).toLocaleString()}
+                  </p>
                 </div>
               </div>
 

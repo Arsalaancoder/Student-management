@@ -11,8 +11,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 
+import { useNavigate } from "react-router-dom"
+
 export default function NotificationBell() {
   const { profile } = useAuth()
+  const navigate = useNavigate()
   const [notifications, setNotifications] = useState<any[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
 
@@ -71,14 +74,18 @@ export default function NotificationBell() {
     }
   }, [profile])
 
-  const handleMarkAsRead = async (id: string, isRead: boolean) => {
-    if (isRead) return
-    try {
-      await markAsRead(id)
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
-      setUnreadCount(prev => Math.max(0, prev - 1))
-    } catch (err) {
-      console.error("Failed to mark as read", err)
+  const handleNotificationClick = async (n: any) => {
+    if (!n.is_read) {
+      try {
+        await markAsRead(n.id)
+        setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, is_read: true } : item))
+        setUnreadCount(prev => Math.max(0, prev - 1))
+      } catch (err) {
+        console.error("Failed to mark as read", err)
+      }
+    }
+    if (profile?.role === "student") {
+      navigate("/student/assignments")
     }
   }
 
@@ -145,7 +152,7 @@ export default function NotificationBell() {
                 <div 
                   key={n.id} 
                   className={`p-4 hover:bg-slate-50 transition-colors cursor-pointer flex gap-3 ${!n.is_read ? 'bg-indigo-50/30' : ''}`}
-                  onClick={() => handleMarkAsRead(n.id, n.is_read)}
+                  onClick={() => handleNotificationClick(n)}
                 >
                   <div className={`mt-0.5 h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${!n.is_read ? 'bg-white shadow-sm' : 'bg-slate-100'}`}>
                     {getIcon(n.type)}

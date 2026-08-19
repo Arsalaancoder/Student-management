@@ -2,14 +2,16 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Clock, CheckCircle2, TrendingUp, Loader2 } from "lucide-react"
+import { BookOpen, Clock, CheckCircle2, TrendingUp } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Link } from "react-router-dom"
 import { useSmartReminders } from "@/hooks/useSmartReminders"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ClipboardList, Award } from "lucide-react"
+import { ClipboardList, Award, AlertTriangle } from "lucide-react"
+import { toast } from "sonner"
+import { isAssignmentTargetedToStudent } from "@/lib/targeting"
 
 interface DashboardStats {
   creditsEarned: number
@@ -40,6 +42,8 @@ export default function StudentDashboard() {
   const { profile } = useAuth()
   useSmartReminders()
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [notEnrolled, setNotEnrolled] = useState(false)
   const [stats, setStats] = useState<DashboardStats>({
     creditsEarned: 0,
     enrolledSubjects: 0,
@@ -58,6 +62,8 @@ export default function StudentDashboard() {
     const fetchDashboardData = async () => {
       try {
         setLoading(true)
+        setFetchError(null)
+        setNotEnrolled(false)
         
         // 1. Fetch Credits Earned
         const { data: creditsData } = await supabase
@@ -86,26 +92,33 @@ export default function StudentDashboard() {
           .eq("student_id" as any, profile.id)) as any
 
         const subjectIds = enrollments?.map((e: any) => e.subject_id) || []
+
+        if (subjectIds.length === 0) {
+          setNotEnrolled(true)
+        }
         
         let pendingCount = 0
         let recentAssigns: RecentAssignment[] = []
 
-        if (subjectIds.length > 0) {
-          // Get all assignments for enrolled subjects
-          const { data: allAssignments } = (await supabase
+          // Get assignments targeted to this student's branch, year, and section
+          const { data: rawAssignments } = await supabase
             .from("assignments")
-            .select("id, title, deadline, subjects(name)")
-            .in("subject_id" as any, subjectIds)) as any
+            .select("id, title, deadline, target_branch, target_year, all_sections, subject_name, subjects(name), assignment_sections(section)")
+
+          // Filter by targeting rules
+          const targetedAssignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, profile))
 
           // Get student's submissions to filter out completed ones
+          const studentProfileId = profile.id
+          const studentAuthId = profile.auth_user_id || profile.id
           const { data: mySubmissions } = (await supabase
             .from("submissions")
             .select("assignment_id")
-            .eq("student_id" as any, profile.id)) as any
+            .or(`student_id.eq.${studentProfileId},student_id.eq.${studentAuthId}`)) as any
 
           const submittedAssignmentIds = new Set(mySubmissions?.map((s: any) => s.assignment_id) || [])
 
-          const pendingAssignmentsList = (allAssignments || [])
+          const pendingAssignmentsList = targetedAssignments
             .filter((a: any) => !submittedAssignmentIds.has(a.id))
             .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
 
@@ -114,10 +127,9 @@ export default function StudentDashboard() {
           recentAssigns = pendingAssignmentsList.slice(0, 3).map((a: any) => ({
             id: a.id,
             title: a.title,
-            subjectName: (a.subjects as any)?.name || "Unknown Subject",
+            subjectName: a.subject_name || (a.subjects as any)?.name || "General",
             deadline: a.deadline
           }))
-        }
 
         // 5. Fetch Recent Grades
         const { data: gradesData } = await supabase
@@ -200,6 +212,8 @@ export default function StudentDashboard() {
         setRecentGrades(formattedGrades)
       } catch (error) {
         console.error("Error fetching dashboard data:", error)
+        setFetchError("Unable to load dashboard data. Please refresh the page.")
+        toast.error("Failed to load dashboard data.")
       } finally {
         setLoading(false)
       }
@@ -230,6 +244,19 @@ export default function StudentDashboard() {
           <Skeleton className="h-[300px] rounded-[2rem]" />
           <Skeleton className="h-[300px] rounded-[2rem]" />
         </div>
+      </div>
+    )
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+        <AlertTriangle className="h-12 w-12 text-orange-400" />
+        <h2 className="text-xl font-bold text-[#0B1E43]">Something went wrong</h2>
+        <p className="text-muted-foreground text-center max-w-sm">{fetchError}</p>
+        <Button onClick={() => window.location.reload()} className="rounded-full px-8">
+          Refresh Page
+        </Button>
       </div>
     )
   }
@@ -273,7 +300,7 @@ export default function StudentDashboard() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-bold text-[#0B1E43] tracking-tight">{stats.averageScore.toFixed(1)}%</div>
+            <div className="text-4xl font-bold text-[#0B1E43] tracking-tight">{(Number(stats.averageScore) || 0).toFixed(1)}%</div>
             <div className="flex items-center gap-2 mt-2">
               <span className="text-sm font-medium text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-md">Excellent</span>
               <span className="text-xs text-muted-foreground">overall performance</span>
@@ -339,7 +366,14 @@ export default function StudentDashboard() {
             <CardDescription>Your pending assignments sorted by due date.</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 px-8 pb-8 pt-4">
-            {recentAssignments.length === 0 ? (
+            {notEnrolled && recentAssignments.length === 0 ? (
+              <EmptyState
+                icon={BookOpen}
+                title="Not enrolled in any subjects"
+                description="Go to Assignments and enter a subject code from your professor to start seeing deadlines here."
+                action={{ label: "Go to Assignments", onClick: () => window.location.href = "/student/assignments" }}
+              />
+            ) : recentAssignments.length === 0 ? (
               <EmptyState 
                 icon={ClipboardList} 
                 title="All caught up!" 
@@ -348,20 +382,26 @@ export default function StudentDashboard() {
             ) : (
               <div className="space-y-4">
                 {recentAssignments.map((assignment) => (
-                  <div key={assignment.id} className="group p-4 bg-white border rounded-2xl flex items-center justify-between hover:shadow-md hover:border-primary/20 transition-all duration-300">
-                    <div className="space-y-1">
-                      <p className="font-semibold text-sm group-hover:text-primary transition-colors">{assignment.title}</p>
-                      <p className="text-xs text-muted-foreground font-medium">{assignment.subjectName}</p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-semibold px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg">
-                        {getDaysUntil(assignment.deadline)}
+                  <Link key={assignment.id} to={`/student/assignments/${assignment.id}`}>
+                    <div className="group p-4 bg-white border rounded-2xl flex items-center justify-between hover:shadow-md hover:border-primary/20 transition-all duration-300 cursor-pointer">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-sm group-hover:text-primary transition-colors">{assignment.title}</p>
+                        <p className="text-xs text-muted-foreground font-medium">{assignment.subjectName}</p>
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        {new Date(assignment.deadline).toLocaleDateString()}
-                      </p>
+                      <div className="text-right">
+                        <div className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${
+                          getDaysUntil(assignment.deadline) === 'Overdue' ? 'bg-red-50 text-red-600' :
+                          getDaysUntil(assignment.deadline) === 'Today' || getDaysUntil(assignment.deadline) === 'Tomorrow' ? 'bg-orange-50 text-orange-600' :
+                          'bg-rose-50 text-rose-600'
+                        }`}>
+                          {getDaysUntil(assignment.deadline)}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {new Date(assignment.deadline).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -7,22 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { 
   Loader2, ArrowLeft, Save, AlertCircle, Plus, Trash2, CheckCircle2, 
-  RefreshCw, BookOpen, Upload, FileText, X, File 
+  Upload, FileText, X 
 } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { createNotificationForSubject } from "@/lib/notifications"
-import { Skeleton } from "@/components/ui/skeleton"
-
-interface Subject {
-  id: string
-  name: string
-  code: string
-}
+import { createNotificationForTargetGroup } from "@/lib/notifications"
 
 interface FormErrors {
   title?: string
-  subject_id?: string
+  subject_name?: string
+  target_branch?: string
+  target_year?: string
+  target_sections?: string
   description?: string
   deadline?: string
   max_marks?: string
@@ -41,16 +37,16 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 export default function CreateAssignment() {
   const { profile } = useAuth()
   const navigate = useNavigate()
-  const { subjectId: routeSubjectId } = useParams<{ subjectId: string }>()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [subjectError, setSubjectError] = useState<string | null>(null)
   const [formErrors, setFormErrors] = useState<FormErrors>({})
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  // Distribution State
+  const [distributionType, setDistributionType] = useState<"all" | "specific">("all")
+  const [selectedSections, setSelectedSections] = useState<string[]>([])
 
   // Rubric State
   const [useRubric, setUseRubric] = useState(false)
@@ -60,7 +56,9 @@ export default function CreateAssignment() {
 
   const [formData, setFormData] = useState({
     title: "",
-    subject_id: routeSubjectId || "",
+    subject_name: "",
+    target_branch: "",
+    target_year: "",
     description: "",
     instructions: "",
     deadline: "",
@@ -69,39 +67,7 @@ export default function CreateAssignment() {
     allowed_file_types: ".pdf,.doc,.docx"
   })
 
-  const fetchSubjects = async (professorId: string) => {
-    try {
-      setSubjectError(null)
-      const { data, error } = await supabase
-        .from("subjects")
-        .select("id, name, code")
-        .eq("professor_id", professorId)
-        .order("name")
-
-      if (error) throw error
-      setSubjects(data || [])
-    } catch (err: any) {
-      console.error("Error fetching subjects:", err)
-      setSubjectError("Unable to load your subjects. Please try again.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (profile === undefined) return
-    if (profile === null) { setLoading(false); return }
-    fetchSubjects(profile.id)
-  }, [profile])
-
-  // When routeSubjectId changes (e.g. navigating from a specific subject page)
-  useEffect(() => {
-    if (routeSubjectId) {
-      setFormData(prev => ({ ...prev, subject_id: routeSubjectId }))
-    }
-  }, [routeSubjectId])
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
     if (formErrors[name as keyof FormErrors]) {
@@ -160,13 +126,22 @@ export default function CreateAssignment() {
 
   const validate = (): boolean => {
     const errors: FormErrors = {}
-    if (!formData.title.trim()) errors.title = "Assignment title is required."
-    if (!formData.subject_id) errors.subject_id = "Please select a subject."
-    if (!formData.description.trim()) errors.description = "A short description is required."
+    if (!formData.title.trim()) {
+      errors.title = "Assignment title is required."
+    }
+    if (!formData.subject_name || !formData.subject_name.trim()) {
+      errors.subject_name = "Please enter the subject name."
+    }
+    if (!formData.description.trim()) {
+      errors.description = "A short description is required."
+    }
     if (!formData.deadline) {
       errors.deadline = "Deadline is required."
     } else if (new Date(formData.deadline) <= new Date()) {
       errors.deadline = "Deadline must be in the future."
+    }
+    if (distributionType === "specific" && selectedSections.length === 0) {
+      errors.target_sections = "Please select at least one section when Specific Sections is chosen."
     }
     if (!useRubric) {
       const marks = parseInt(formData.max_marks)
@@ -188,13 +163,11 @@ export default function CreateAssignment() {
       setSaving(true)
       setUploadProgress(0)
 
-      // Verify the selected subject belongs to this professor
-      const selectedSubject = subjects.find(s => s.id === formData.subject_id)
-      if (!selectedSubject) {
-        toast.error("Invalid subject selected. Please select one of your own subjects.")
-        setSaving(false)
-        return
-      }
+      const trimmedTitle = formData.title.trim()
+      const trimmedSubjectName = formData.subject_name.trim()
+      const targetBranchStr = formData.target_branch.trim() || null
+      const targetYearNum = formData.target_year ? parseInt(formData.target_year) : null
+      const isAllSections = distributionType === "all"
 
       let assignmentFilePath: string | null = null
 
@@ -202,7 +175,7 @@ export default function CreateAssignment() {
       if (selectedFile) {
         const timestamp = Date.now()
         const safeFileName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")
-        const filePath = `${profile.id}/${formData.subject_id}/${timestamp}_${safeFileName}`
+        const filePath = `${profile.id}/${timestamp}_${safeFileName}`
 
         setUploadProgress(10)
 
@@ -225,12 +198,15 @@ export default function CreateAssignment() {
         .map(t => t.trim())
         .filter(t => t.length > 0)
 
-      // Create assignment record
+      // Create assignment record with manual subject_name and targeting criteria
       const { data: newAssignment, error: insertError } = await supabase
         .from("assignments")
         .insert([{
-          title: formData.title.trim(),
-          subject_id: formData.subject_id,
+          title: trimmedTitle,
+          subject_name: trimmedSubjectName,
+          target_branch: targetBranchStr,
+          target_year: targetYearNum,
+          all_sections: isAllSections,
           description: formData.description.trim(),
           instructions: formData.instructions.trim() || null,
           deadline: new Date(formData.deadline).toISOString(),
@@ -245,7 +221,6 @@ export default function CreateAssignment() {
         .single()
 
       if (insertError) {
-        // If DB insert fails but file was uploaded, try to clean up orphaned file
         if (assignmentFilePath) {
           await supabase.storage.from("assignments").remove([assignmentFilePath]).catch(err => {
             console.warn("Could not clean up orphaned file:", err)
@@ -254,24 +229,40 @@ export default function CreateAssignment() {
         throw insertError
       }
 
+      // If specific sections chosen, insert into assignment_sections table
+      if (!isAllSections && selectedSections.length > 0) {
+        const sectionRows = selectedSections.map(sec => ({
+          assignment_id: newAssignment.id,
+          section: sec
+        }))
+
+        const { error: secInsertErr } = await supabase
+          .from("assignment_sections")
+          .insert(sectionRows)
+
+        if (secInsertErr) {
+          console.error("Error inserting assignment_sections:", secInsertErr)
+          // Delete created assignment if section mapping fails
+          await supabase.from("assignments").delete().eq("id", newAssignment.id)
+          throw secInsertErr
+        }
+      }
+
       setUploadProgress(100)
 
-      // Notify enrolled students (fire and forget)
-      createNotificationForSubject(
-        formData.subject_id,
-        "New Assignment Created",
-        `A new assignment "${formData.title}" has been posted.`,
-        "new_assignment"
-      ).catch(err => console.warn("Notification failed (non-critical):", err))
+      // Notify targeted students
+      await createNotificationForTargetGroup(
+        targetBranchStr,
+        targetYearNum,
+        null,
+        "New Assignment Posted",
+        `A new assignment "${trimmedTitle}" for ${trimmedSubjectName} has been posted.`,
+        "new_assignment",
+        !isAllSections ? selectedSections : null
+      )
 
-      toast.success("Assignment created successfully!")
-
-      // Navigate back to subject page if came from subject, otherwise assignments list
-      if (routeSubjectId) {
-        navigate(`/professor/subjects/${routeSubjectId}`)
-      } else {
-        navigate("/professor/assignments")
-      }
+      toast.success("Assignment created and published successfully!")
+      navigate("/professor/assignments")
 
     } catch (err: any) {
       console.error("Error creating assignment:", err)
@@ -282,95 +273,16 @@ export default function CreateAssignment() {
     }
   }
 
-  // ── Loading ────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="space-y-8 pb-10 max-w-4xl mx-auto">
-        <div className="flex items-center gap-4">
-          <Skeleton className="h-10 w-10 rounded-full" />
-          <div className="space-y-2">
-            <Skeleton className="h-9 w-64 rounded-lg" />
-            <Skeleton className="h-5 w-48 rounded-lg" />
-          </div>
-        </div>
-        <Skeleton className="h-[600px] w-full rounded-[2rem]" />
-      </div>
-    )
-  }
-
-  // ── Subject load error ─────────────────────────────────────────────
-  if (subjectError) {
-    return (
-      <div className="space-y-8 pb-10 max-w-4xl mx-auto">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild className="rounded-full hover:bg-muted">
-            <Link to="/professor/subjects"><ArrowLeft className="h-5 w-5" /></Link>
-          </Button>
-          <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Create Assignment</h1>
-        </div>
-        <Card className="border-none shadow-sm rounded-[2rem]">
-          <CardContent className="p-12 flex flex-col items-center text-center gap-4">
-            <div className="h-16 w-16 bg-red-50 rounded-full flex items-center justify-center">
-              <AlertCircle className="h-8 w-8 text-red-500" />
-            </div>
-            <h3 className="text-lg font-bold text-[#0B1E43]">Could Not Load Subjects</h3>
-            <p className="text-muted-foreground max-w-sm">{subjectError}</p>
-            <Button onClick={() => { setLoading(true); if (profile) fetchSubjects(profile.id) }} className="mt-2 rounded-full gap-2">
-              <RefreshCw className="h-4 w-4" /> Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // ── No subjects ────────────────────────────────────────────────────
-  if (subjects.length === 0) {
-    return (
-      <div className="space-y-8 pb-10 max-w-4xl mx-auto">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild className="rounded-full hover:bg-muted">
-            <Link to="/professor/subjects"><ArrowLeft className="h-5 w-5" /></Link>
-          </Button>
-          <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Create Assignment</h1>
-        </div>
-        <Card className="border-none shadow-sm rounded-[2rem]">
-          <CardContent className="p-12 flex flex-col items-center text-center gap-4">
-            <div className="h-16 w-16 bg-blue-50 rounded-full flex items-center justify-center">
-              <BookOpen className="h-8 w-8 text-blue-500" />
-            </div>
-            <h3 className="text-lg font-bold text-[#0B1E43]">No Subjects Available</h3>
-            <p className="text-muted-foreground max-w-sm">
-              Create a subject first before creating an assignment.
-            </p>
-            <Button asChild className="mt-2 rounded-full">
-              <Link to="/professor/subjects">Create a Subject</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Get back link
-  const backLink = routeSubjectId ? `/professor/subjects/${routeSubjectId}` : "/professor/subjects"
-  const preSelectedSubject = routeSubjectId ? subjects.find(s => s.id === routeSubjectId) : null
-
-  // ── Main Form ──────────────────────────────────────────────────────
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-4xl mx-auto">
       
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild className="rounded-full hover:bg-muted">
-          <Link to={backLink}><ArrowLeft className="h-5 w-5" /></Link>
+          <Link to="/professor/assignments"><ArrowLeft className="h-5 w-5" /></Link>
         </Button>
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Create Assignment</h1>
-          <p className="text-muted-foreground mt-1">
-            {preSelectedSubject
-              ? `For: ${preSelectedSubject.code} — ${preSelectedSubject.name}`
-              : "Design a new task for your students."}
-          </p>
+          <p className="text-muted-foreground mt-1">Design a new assignment for your students.</p>
         </div>
       </div>
 
@@ -383,54 +295,33 @@ export default function CreateAssignment() {
           <CardContent className="px-8 pb-8 space-y-6">
             <div className="grid gap-6 md:grid-cols-2">
 
-              {/* Subject */}
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-[#0B1E43]">Subject *</label>
-                {preSelectedSubject ? (
-                  <div className="h-12 bg-[#E6F0FF] border-none rounded-2xl px-4 flex items-center text-sm font-bold text-[#1E5EFF]">
-                    {preSelectedSubject.code} — {preSelectedSubject.name}
-                  </div>
-                ) : (
-                  <select
-                    value={formData.subject_id}
-                    onChange={e => { setFormData(prev => ({ ...prev, subject_id: e.target.value })); setFormErrors(prev => ({ ...prev, subject_id: undefined })) }}
-                    className={`h-12 bg-[#F4F7FE] border-none rounded-2xl px-4 focus:outline-none focus:ring-2 focus:ring-primary/20 w-full text-sm ${formErrors.subject_id ? "ring-2 ring-red-400" : ""}`}
-                  >
-                    <option value="">Select a subject</option>
-                    {subjects.map(s => (
-                      <option key={s.id} value={s.id}>{s.code} — {s.name}</option>
-                    ))}
-                  </select>
-                )}
-                {formErrors.subject_id && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.subject_id}</p>}
-              </div>
-
-              {/* Deadline */}
-              <div className="space-y-2">
-                <label htmlFor="deadline" className="text-sm font-bold text-[#0B1E43]">Deadline *</label>
-                <Input
-                  id="deadline" name="deadline" type="datetime-local"
-                  value={formData.deadline} onChange={handleChange}
-                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 ${formErrors.deadline ? "ring-2 ring-red-400" : ""}`}
-                />
-                {formErrors.deadline && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.deadline}</p>}
-              </div>
-
-              {/* Title */}
+              {/* Assignment Title */}
               <div className="space-y-2 md:col-span-2">
                 <label htmlFor="title" className="text-sm font-bold text-[#0B1E43]">Assignment Title *</label>
                 <Input
                   id="title" name="title"
-                  placeholder="e.g. Midterm Project: Neural Network Implementation"
+                  placeholder="e.g. Introduction to KNN"
                   value={formData.title} onChange={handleChange}
-                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 ${formErrors.title ? "ring-2 ring-red-400" : ""}`}
+                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 w-full ${formErrors.title ? "ring-2 ring-red-400" : ""}`}
                 />
                 {formErrors.title && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.title}</p>}
               </div>
 
+              {/* Subject Name (Manual Text Entry) */}
+              <div className="space-y-2 md:col-span-2">
+                <label htmlFor="subject_name" className="text-sm font-bold text-[#0B1E43]">Subject Name *</label>
+                <Input
+                  id="subject_name" name="subject_name"
+                  placeholder="Enter subject name (e.g. Machine Learning)"
+                  value={formData.subject_name} onChange={handleChange}
+                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 w-full ${formErrors.subject_name ? "ring-2 ring-red-400" : ""}`}
+                />
+                {formErrors.subject_name && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.subject_name}</p>}
+              </div>
+
               {/* Description */}
               <div className="space-y-2 md:col-span-2">
-                <label htmlFor="description" className="text-sm font-bold text-[#0B1E43]">Short Description *</label>
+                <label htmlFor="description" className="text-sm font-bold text-[#0B1E43]">Description *</label>
                 <textarea
                   id="description" name="description"
                   placeholder="A brief overview of this assignment..."
@@ -438,6 +329,17 @@ export default function CreateAssignment() {
                   className={`bg-[#F4F7FE] border-none rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[100px] resize-none w-full p-4 text-sm ${formErrors.description ? "ring-2 ring-red-400" : ""}`}
                 />
                 {formErrors.description && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.description}</p>}
+              </div>
+
+              {/* Deadline */}
+              <div className="space-y-2 md:col-span-2">
+                <label htmlFor="deadline" className="text-sm font-bold text-[#0B1E43]">Deadline *</label>
+                <Input
+                  id="deadline" name="deadline" type="datetime-local"
+                  value={formData.deadline} onChange={handleChange}
+                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 w-full ${formErrors.deadline ? "ring-2 ring-red-400" : ""}`}
+                />
+                {formErrors.deadline && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.deadline}</p>}
               </div>
 
               {/* Instructions */}
@@ -449,76 +351,6 @@ export default function CreateAssignment() {
                   value={formData.instructions} onChange={handleChange}
                   className="bg-[#F4F7FE] border-none rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[140px] resize-y w-full p-4 text-sm"
                 />
-              </div>
-
-              {/* Assignment File Upload */}
-              <div className="space-y-3 md:col-span-2">
-                <label className="text-sm font-bold text-[#0B1E43]">Assignment File</label>
-                <p className="text-xs text-muted-foreground">Upload a PDF, DOC, or DOCX file (max 50MB). The file will be stored securely and only accessible to enrolled students.</p>
-                
-                {selectedFile ? (
-                  <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-2xl">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 bg-[#1E5EFF] rounded-xl flex items-center justify-center">
-                        <FileText className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-[#0B1E43]">{selectedFile.name}</p>
-                        <p className="text-xs text-muted-foreground">{formatFileSize(selectedFile.size)}</p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button" variant="ghost" size="sm"
-                      onClick={removeFile}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl"
-                    >
-                      <X className="h-4 w-4 mr-1" /> Remove
-                    </Button>
-                  </div>
-                ) : (
-                  <div
-                    className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-50 transition-colors ${formErrors.assignment_file ? "border-red-300" : "border-slate-200"}`}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <div className="h-12 w-12 bg-slate-100 rounded-2xl flex items-center justify-center">
-                      <Upload className="h-6 w-6 text-slate-400" />
-                    </div>
-                    <div className="text-center">
-                      <p className="font-bold text-sm text-[#0B1E43]">Click to upload assignment file</p>
-                      <p className="text-xs text-muted-foreground mt-1">PDF, DOC, DOCX up to 50MB</p>
-                    </div>
-                  </div>
-                )}
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  onChange={handleFileSelect}
-                />
-
-                {formErrors.assignment_file && (
-                  <p className="text-sm text-red-500 flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5" />{formErrors.assignment_file}
-                  </p>
-                )}
-
-                {/* Upload Progress */}
-                {saving && uploadProgress > 0 && uploadProgress < 100 && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-bold text-muted-foreground">
-                      <span>Uploading file...</span>
-                      <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#1E5EFF] rounded-full transition-all duration-300"
-                        style={{ width: `${uploadProgress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Rubric Toggle */}
@@ -592,7 +424,7 @@ export default function CreateAssignment() {
                   <Input
                     id="max_marks" name="max_marks" type="number" min="1"
                     value={formData.max_marks} onChange={handleChange}
-                    className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 ${formErrors.max_marks ? "ring-2 ring-red-400" : ""}`}
+                    className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 w-full ${formErrors.max_marks ? "ring-2 ring-red-400" : ""}`}
                   />
                   {formErrors.max_marks && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.max_marks}</p>}
                 </div>
@@ -604,7 +436,7 @@ export default function CreateAssignment() {
                 <Input
                   id="max_credits" name="max_credits" type="number" min="0"
                   value={formData.max_credits} onChange={handleChange}
-                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 ${formErrors.max_credits ? "ring-2 ring-red-400" : ""}`}
+                  className={`h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20 w-full ${formErrors.max_credits ? "ring-2 ring-red-400" : ""}`}
                 />
                 {formErrors.max_credits && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />{formErrors.max_credits}</p>}
                 <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -612,22 +444,205 @@ export default function CreateAssignment() {
                 </p>
               </div>
 
-              {/* Allowed File Types */}
-              <div className="space-y-2 md:col-span-2">
-                <label htmlFor="allowed_file_types" className="text-sm font-bold text-[#0B1E43]">Student Submission File Types</label>
-                <Input
-                  id="allowed_file_types" name="allowed_file_types"
-                  placeholder="e.g. .pdf, .doc, .zip"
-                  value={formData.allowed_file_types} onChange={handleChange}
-                  className="h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
+              {/* Assignment File Upload */}
+              <div className="space-y-3 md:col-span-2">
+                <label className="text-sm font-bold text-[#0B1E43]">Assignment File</label>
+                <p className="text-xs text-muted-foreground">Upload a PDF, DOC, or DOCX file (max 50MB).</p>
+                
+                {selectedFile ? (
+                  <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 bg-[#1E5EFF] rounded-xl flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-[#0B1E43]">{selectedFile.name}</p>
+                        <p className="text-xs text-muted-foreground">{formatFileSize(selectedFile.size)}</p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button" variant="ghost" size="sm"
+                      onClick={removeFile}
+                      className="text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl"
+                    >
+                      <X className="h-4 w-4 mr-1" /> Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-50 transition-colors ${formErrors.assignment_file ? "border-red-300" : "border-slate-200"}`}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <div className="h-12 w-12 bg-slate-100 rounded-2xl flex items-center justify-center">
+                      <Upload className="h-6 w-6 text-slate-400" />
+                    </div>
+                    <div className="text-center">
+                      <p className="font-bold text-sm text-[#0B1E43]">Click to upload assignment file</p>
+                      <p className="text-xs text-muted-foreground mt-1">PDF, DOC, DOCX up to 50MB</p>
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={handleFileSelect}
                 />
-                <p className="text-xs text-muted-foreground">Comma-separated extensions students can submit. Leave empty to allow any type.</p>
+
+                {formErrors.assignment_file && (
+                  <p className="text-sm text-red-500 flex items-center gap-1">
+                    <AlertCircle className="h-3.5 w-3.5" />{formErrors.assignment_file}
+                  </p>
+                )}
+
+                {saving && uploadProgress > 0 && uploadProgress < 100 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-bold text-muted-foreground">
+                      <span>Uploading file...</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#1E5EFF] rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ASSIGNMENT DISTRIBUTION */}
+              <div className="md:col-span-2 pt-6 border-t border-muted/50 space-y-4">
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200/80 space-y-6">
+                  <div>
+                    <h3 className="text-base font-bold text-[#0B1E43] uppercase tracking-wider">ASSIGNMENT DISTRIBUTION</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Specify the target Branch, Year, and Section distribution for this assignment.</p>
+                  </div>
+                  
+                  <div className="grid gap-6 md:grid-cols-2">
+                    {/* Branch */}
+                    <div className="space-y-2">
+                      <label htmlFor="target_branch" className="text-sm font-bold text-[#0B1E43]">Branch</label>
+                      <select
+                        id="target_branch"
+                        name="target_branch"
+                        value={formData.target_branch}
+                        onChange={handleChange}
+                        className="h-12 bg-white border border-slate-200 rounded-2xl px-4 focus:outline-none focus:ring-2 focus:ring-primary/20 w-full text-sm font-medium text-slate-900"
+                      >
+                        <option value="">Select Branch</option>
+                        <option value="Computer Science & Engineering">Computer Science & Engineering (CSE)</option>
+                        <option value="Information Technology">Information Technology (IT)</option>
+                        <option value="Electronics & Communication">Electronics & Communication (ECE)</option>
+                        <option value="Electrical & Electronics">Electrical & Electronics (EEE)</option>
+                        <option value="Mechanical Engineering">Mechanical Engineering (MECH)</option>
+                        <option value="Civil Engineering">Civil Engineering (CIVIL)</option>
+                        <option value="AI & ML">Artificial Intelligence & Machine Learning (AI&ML)</option>
+                        <option value="Data Science">Artificial Intelligence & Data Science (AI&DS)</option>
+                      </select>
+                    </div>
+
+                    {/* Year */}
+                    <div className="space-y-2">
+                      <label htmlFor="target_year" className="text-sm font-bold text-[#0B1E43]">Year</label>
+                      <select
+                        id="target_year"
+                        name="target_year"
+                        value={formData.target_year}
+                        onChange={handleChange}
+                        className="h-12 bg-white border border-slate-200 rounded-2xl px-4 focus:outline-none focus:ring-2 focus:ring-primary/20 w-full text-sm font-medium text-slate-900"
+                      >
+                        <option value="">Select Year</option>
+                        <option value="1">1st Year</option>
+                        <option value="2">2nd Year</option>
+                        <option value="3">3rd Year</option>
+                        <option value="4">4th Year</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Distribution Radios */}
+                  <div className="space-y-3 pt-2">
+                    <label className="text-sm font-bold text-[#0B1E43] block">Distribution</label>
+                    <div className="flex gap-6">
+                      <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-800">
+                        <input
+                          type="radio"
+                          name="distributionType"
+                          value="all"
+                          checked={distributionType === "all"}
+                          onChange={() => {
+                            setDistributionType("all")
+                            setFormErrors(prev => ({ ...prev, target_sections: undefined }))
+                          }}
+                          className="h-4 w-4 text-[#1E5EFF] focus:ring-primary"
+                        />
+                        All Sections
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-800">
+                        <input
+                          type="radio"
+                          name="distributionType"
+                          value="specific"
+                          checked={distributionType === "specific"}
+                          onChange={() => setDistributionType("specific")}
+                          className="h-4 w-4 text-[#1E5EFF] focus:ring-primary"
+                        />
+                        Specific Sections
+                      </label>
+                    </div>
+
+                    {distributionType === "all" && (
+                      <p className="text-xs text-muted-foreground italic">
+                        The assignment applies to every section within the selected Branch + Year.
+                      </p>
+                    )}
+
+                    {/* Specific Sections Multi-Select Checkboxes */}
+                    {distributionType === "specific" && (
+                      <div className="space-y-2 pt-2 animate-in fade-in duration-300">
+                        <label className="text-xs font-semibold text-slate-600 block">Select Specific Sections *</label>
+                        <div className="flex flex-wrap gap-4 pt-1">
+                          {["A", "B", "C", "D", "E", "F"].map(sec => (
+                            <label key={sec} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${selectedSections.includes(sec) ? "border-[#1E5EFF] bg-blue-50/80 text-[#1E5EFF] font-bold" : "border-slate-200 bg-white text-slate-700"}`}>
+                              <input
+                                type="checkbox"
+                                value={sec}
+                                checked={selectedSections.includes(sec)}
+                                onChange={(e) => {
+                                  const checked = e.target.checked
+                                  if (checked) {
+                                    setSelectedSections(prev => [...prev, sec])
+                                  } else {
+                                    setSelectedSections(prev => prev.filter(s => s !== sec))
+                                  }
+                                  if (formErrors.target_sections) {
+                                    setFormErrors(prev => ({ ...prev, target_sections: undefined }))
+                                  }
+                                }}
+                                className="h-4 w-4 rounded text-[#1E5EFF] focus:ring-primary"
+                              />
+                              <span>{sec}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {formErrors.target_sections && (
+                          <p className="text-sm text-red-500 flex items-center gap-1 mt-1">
+                            <AlertCircle className="h-3.5 w-3.5" />{formErrors.target_sections}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
             <div className="pt-8 flex justify-end gap-4 border-t border-muted/50">
               <Button type="button" variant="ghost" asChild className="rounded-full px-6 h-12 font-bold hover:bg-muted">
-                <Link to={backLink}>Cancel</Link>
+                <Link to="/professor/assignments">Cancel</Link>
               </Button>
               <Button
                 type="submit" disabled={saving}
@@ -636,7 +651,7 @@ export default function CreateAssignment() {
                 {saving ? (
                   <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {uploadProgress > 0 ? `Uploading ${uploadProgress}%` : "Creating..."}</>
                 ) : (
-                  <><Save className="mr-2 h-4 w-4" /> Publish Assignment</>
+                  <><Save className="mr-2 h-4 w-4" /> Create & Publish Assignment</>
                 )}
               </Button>
             </div>

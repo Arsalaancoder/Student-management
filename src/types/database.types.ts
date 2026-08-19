@@ -27,6 +27,11 @@ export type Database = {
           max_credits: number | null
           max_marks: number | null
           subject_id: string | null
+          subject_name: string | null
+          target_branch: string | null
+          target_year: number | null
+          target_section: string | null
+          all_sections: boolean | null
           title: string
           updated_at: string
         }
@@ -42,6 +47,11 @@ export type Database = {
           max_credits?: number | null
           max_marks?: number | null
           subject_id?: string | null
+          subject_name?: string | null
+          target_branch?: string | null
+          target_year?: number | null
+          target_section?: string | null
+          all_sections?: boolean | null
           title: string
           updated_at?: string
         }
@@ -57,6 +67,11 @@ export type Database = {
           max_credits?: number | null
           max_marks?: number | null
           subject_id?: string | null
+          subject_name?: string | null
+          target_branch?: string | null
+          target_year?: number | null
+          target_section?: string | null
+          all_sections?: boolean | null
           title?: string
           updated_at?: string
         }
@@ -75,6 +90,35 @@ export type Database = {
             referencedRelation: "subjects"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      assignment_sections: {
+        Row: {
+          id: string
+          assignment_id: string
+          section: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          assignment_id: string
+          section: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          assignment_id?: string
+          section?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assignment_sections_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
+            referencedColumns: ["id"]
+          }
         ]
       }
       credit_transactions: {

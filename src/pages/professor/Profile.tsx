@@ -1,18 +1,38 @@
 // @ts-nocheck
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, User, Mail, Building, Hash, ShieldCheck, Camera, Fingerprint, Plus, Trash2 } from "lucide-react"
+import { 
+  Loader2, 
+  User, 
+  Mail, 
+  Building, 
+  ShieldCheck, 
+  Camera, 
+  Fingerprint, 
+  Plus, 
+  Trash2, 
+  Upload,
+  Edit3,
+  X,
+  Check
+} from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function ProfessorProfile() {
-  const { profile, registerPasskey, isWebAuthnSupported } = useAuth()
+  const { user, profile, refreshProfile, registerPasskey, isWebAuthnSupported } = useAuth()
   
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  
   const [passkeys, setPasskeys] = useState<any[]>([])
   const [loadingPasskeys, setLoadingPasskeys] = useState(false)
   
@@ -51,13 +71,32 @@ export default function ProfessorProfile() {
   const handleAddPasskey = async () => {
     try {
       setSaving(true)
-      const { data, error } = await registerPasskey()
-      if (error) throw error
+      const res = await registerPasskey()
+
+      if (res?.error) {
+        const err = res.error
+        const errorMsg = err.message || ""
+        if (err.name === 'NotAllowedError' || errorMsg.includes('cancelled') || errorMsg.includes('abort')) {
+          toast.info("Passkey registration was cancelled.")
+        } else if (errorMsg.toLowerCase().includes("disabled") || errorMsg.toLowerCase().includes("webauthn")) {
+          toast.error("Passkey authentication is currently disabled in your Supabase Auth settings. Please sign in using your email & password.")
+        } else if (errorMsg.includes("verification") || errorMsg.includes("failed")) {
+          toast.error("Credential verification failed. Please check that Windows Hello / Touch ID is set up on your device.")
+        } else {
+          toast.error(errorMsg || "Failed to register passkey.")
+        }
+        return
+      }
+
       toast.success("Passkey registered successfully!")
-      fetchPasskeys()
+      await fetchPasskeys()
     } catch (error: any) {
       console.error("Passkey registration failed:", error)
-      toast.error(error.message || "Failed to register passkey.")
+      if (error?.name === 'NotAllowedError' || error?.message?.includes('cancelled')) {
+        toast.info("Passkey registration was cancelled.")
+      } else {
+        toast.error(error?.message || "Failed to register passkey.")
+      }
     } finally {
       setSaving(false)
     }
@@ -83,6 +122,104 @@ export default function ProfessorProfile() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  const handleCancel = () => {
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name || "",
+        department: profile.department || "",
+      })
+    }
+    setIsEditing(false)
+  }
+
+  const handlePhotoSelect = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Reset input value so re-selecting same file triggers onChange
+    e.target.value = ""
+
+    // Validate file type
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    const isTypeValid = validTypes.includes(file.type.toLowerCase())
+    
+    // Validate file size (5MB = 5 * 1024 * 1024 bytes)
+    const isSizeValid = file.size <= 5 * 1024 * 1024
+
+    if (!isTypeValid || !isSizeValid) {
+      toast.error("Please select a JPG, PNG, or WEBP image under 5 MB.")
+      return
+    }
+
+    // Show preview
+    const objectUrl = URL.createObjectURL(file)
+    setPreviewUrl(objectUrl)
+    setUploading(true)
+
+    try {
+      const userId = user?.id || profile?.auth_user_id
+      if (!userId) {
+        throw new Error("User authentication ID not found")
+      }
+
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'png'
+      const filePath = `${userId}/profile.${fileExt}`
+
+      // Upload file to Supabase Storage in avatars bucket
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        })
+
+      if (uploadError) throw uploadError
+
+      // Generate signed URL (10 years) for private bucket access
+      const { data: signedData, error: signedUrlError } = await supabase.storage
+        .from('avatars')
+        .createSignedUrl(filePath, 315360000)
+
+      let finalPhotoUrl = ""
+      if (!signedUrlError && signedData?.signedUrl) {
+        // Append timestamp cache buster
+        finalPhotoUrl = `${signedData.signedUrl}&t=${Date.now()}`
+      } else {
+        // Fallback to getPublicUrl
+        const { data: publicData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(filePath)
+        finalPhotoUrl = `${publicData.publicUrl}?t=${Date.now()}`
+      }
+
+      // Update profile record in database
+      const profileId = profile?.id
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          profile_photo_url: finalPhotoUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", profileId)
+
+      if (updateError) throw updateError
+
+      // Refresh context profile state immediately
+      await refreshProfile()
+      toast.success("Photo updated successfully.")
+    } catch (error: any) {
+      console.error("Error uploading photo:", error)
+      toast.error("Unable to upload profile photo. Please try again.")
+      setPreviewUrl(null)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
@@ -101,11 +238,12 @@ export default function ProfessorProfile() {
 
       if (error) throw error
       
-      toast.success("Profile updated successfully")
-      
+      await refreshProfile()
+      toast.success("Profile updated successfully.")
+      setIsEditing(false)
     } catch (error: any) {
       console.error("Error updating profile:", error)
-      toast.error(error.message || "Failed to update profile")
+      toast.error(error.message || "Unable to update your profile.")
     } finally {
       setSaving(false)
     }
@@ -119,9 +257,20 @@ export default function ProfessorProfile() {
     )
   }
 
+  const avatarSrc = previewUrl || profile.profile_photo_url || ""
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-4xl mx-auto">
       
+      {/* Hidden File Input */}
+      <input 
+        type="file" 
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/jpeg,image/jpg,image/png,image/webp"
+        className="hidden"
+      />
+
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Profile Settings</h1>
         <p className="text-muted-foreground mt-1">Manage your academic identity and security settings.</p>
@@ -135,16 +284,44 @@ export default function ProfessorProfile() {
             <div className="h-32 bg-gradient-to-r from-[#1E5EFF] to-[#4DB8FF]" />
             <CardContent className="px-8 pb-8 pt-0 flex flex-col items-center text-center">
               
-              <div className="relative -mt-16 mb-4 group cursor-pointer">
+              {/* Profile Photo Avatar */}
+              <div className="relative -mt-16 mb-4 group cursor-pointer" onClick={handlePhotoSelect}>
                 <Avatar className="h-32 w-32 border-4 border-white shadow-md">
-                  <AvatarImage src={profile.profile_photo_url || ""} />
+                  <AvatarImage src={avatarSrc} key={avatarSrc} alt="Profile photo" />
                   <AvatarFallback className="bg-primary/10 text-primary text-3xl font-bold uppercase">
                     {profile.full_name ? profile.full_name.charAt(0) : "P"}
                   </AvatarFallback>
                 </Avatar>
-                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Camera className="h-8 w-8 text-white" />
+
+                {/* Uploading Overlay or Hover Camera */}
+                <div className={`absolute inset-0 bg-black/40 rounded-full flex flex-col items-center justify-center transition-opacity ${uploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  {uploading ? (
+                    <>
+                      <Loader2 className="h-7 w-7 text-white animate-spin mb-1" />
+                      <span className="text-[10px] text-white font-medium">Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="h-7 w-7 text-white mb-1" />
+                      <span className="text-[10px] text-white font-medium">Change</span>
+                    </>
+                  )}
                 </div>
+              </div>
+
+              {/* Upload Photo Button */}
+              <div className="mb-4">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handlePhotoSelect}
+                  disabled={uploading}
+                  className="rounded-full font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 text-xs"
+                >
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 text-primary" />}
+                  {uploading ? "Uploading..." : "Upload Photo"}
+                </Button>
               </div>
 
               <h2 className="text-2xl font-bold text-[#0B1E43] capitalize">{profile.full_name}</h2>
@@ -171,16 +348,27 @@ export default function ProfessorProfile() {
         {/* Right Column: Settings Form & Security */}
         <div className="md:col-span-2 space-y-6">
           <Card className="border-none shadow-sm rounded-[2rem]">
-            <CardHeader className="p-8 pb-4 border-b border-muted/50">
+            <CardHeader className="p-8 pb-4 border-b border-muted/50 flex flex-row items-center justify-between">
               <CardTitle className="text-xl flex items-center gap-2">
                 <User className="h-5 w-5 text-muted-foreground" />
                 Personal Information
               </CardTitle>
+
+              {!isEditing && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setIsEditing(true)}
+                  className="rounded-full text-xs font-bold gap-2 border-primary/30 text-primary hover:bg-primary/5"
+                >
+                  <Edit3 className="h-3.5 w-3.5" /> Edit Profile
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
                 
-                {/* Non-editable fields */}
+                {/* Non-editable Email field */}
                 <div className="grid gap-6 md:grid-cols-2 p-6 bg-slate-50 rounded-2xl border border-slate-100 mb-8">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -191,7 +379,7 @@ export default function ProfessorProfile() {
                   </div>
                 </div>
 
-                {/* Editable fields */}
+                {/* Editable / Display fields */}
                 <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-3">
                     <label htmlFor="full_name" className="text-sm font-bold text-[#0B1E43] block mb-2">Full Name</label>
@@ -202,7 +390,8 @@ export default function ProfessorProfile() {
                         name="full_name"
                         value={formData.full_name} 
                         onChange={handleChange}
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
+                        disabled={!isEditing}
+                        className={`pl-11 h-12 rounded-2xl focus-visible:ring-primary/20 ${isEditing ? 'bg-[#F4F7FE] border-none' : 'bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed'}`}
                       />
                     </div>
                   </div>
@@ -216,18 +405,35 @@ export default function ProfessorProfile() {
                         name="department"
                         value={formData.department} 
                         onChange={handleChange}
+                        disabled={!isEditing}
                         placeholder="e.g. Computer Science"
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
+                        className={`pl-11 h-12 rounded-2xl focus-visible:ring-primary/20 ${isEditing ? 'bg-[#F4F7FE] border-none' : 'bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed'}`}
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-muted/50 flex justify-end">
-                  <Button type="submit" disabled={saving} className="rounded-full px-8 h-12 text-sm font-bold">
-                    {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : "Save Changes"}
-                  </Button>
-                </div>
+                {/* Form Buttons */}
+                {isEditing && (
+                  <div className="pt-6 border-t border-muted/50 flex justify-end gap-3">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={handleCancel}
+                      disabled={saving}
+                      className="rounded-full px-6 h-12 text-sm font-bold border-slate-200 text-slate-700 hover:bg-slate-100 gap-2"
+                    >
+                      <X className="h-4 w-4" /> Cancel
+                    </Button>
+                    <Button 
+                      type="submit" 
+                      disabled={saving} 
+                      className="rounded-full px-8 h-12 text-sm font-bold gap-2"
+                    >
+                      {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : <><Check className="h-4 w-4" /> Save Changes</>}
+                    </Button>
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

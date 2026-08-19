@@ -1,18 +1,41 @@
 // @ts-nocheck
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, User, Mail, Building, Hash, Calendar, Layers, ShieldCheck, Camera, Fingerprint, Plus, Trash2 } from "lucide-react"
+import { 
+  Loader2, 
+  User, 
+  Mail, 
+  Building, 
+  Hash, 
+  Calendar, 
+  Layers, 
+  ShieldCheck, 
+  Camera, 
+  Fingerprint, 
+  Plus, 
+  Trash2, 
+  Upload,
+  Edit3,
+  X,
+  Check
+} from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function StudentProfile() {
-  const { profile, registerPasskey, isWebAuthnSupported } = useAuth()
+  const { user, profile, refreshProfile, registerPasskey, isWebAuthnSupported } = useAuth()
   
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  const [isEditing, setIsEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  
   const [passkeys, setPasskeys] = useState<any[]>([])
   const [loadingPasskeys, setLoadingPasskeys] = useState(false)
   
@@ -39,10 +62,8 @@ export default function StudentProfile() {
   const fetchPasskeys = async () => {
     try {
       setLoadingPasskeys(true)
-      // Attempt to fetch enrolled factors
       const { data, error } = await supabase.auth.mfa.listFactors()
       if (error) throw error
-      // Filter for webauthn factors
       const webAuthnFactors = data?.all?.filter(f => f.factor_type === 'webauthn') || []
       setPasskeys(webAuthnFactors)
     } catch (error) {
@@ -59,13 +80,32 @@ export default function StudentProfile() {
   const handleAddPasskey = async () => {
     try {
       setSaving(true)
-      const { error } = await registerPasskey()
-      if (error) throw error
+      const res = await registerPasskey()
+
+      if (res?.error) {
+        const err = res.error
+        const errorMsg = err.message || ""
+        if (err.name === 'NotAllowedError' || errorMsg.includes('cancelled') || errorMsg.includes('abort')) {
+          toast.info("Passkey registration was cancelled.")
+        } else if (errorMsg.toLowerCase().includes("disabled") || errorMsg.toLowerCase().includes("webauthn")) {
+          toast.error("Passkey authentication is currently disabled in your Supabase Auth settings. Please sign in using your email & password.")
+        } else if (errorMsg.includes("verification") || errorMsg.includes("failed")) {
+          toast.error("Credential verification failed. Please check that Windows Hello / Touch ID is set up on your device.")
+        } else {
+          toast.error(errorMsg || "Failed to register passkey.")
+        }
+        return
+      }
+
       toast.success("Passkey registered successfully!")
-      fetchPasskeys()
+      await fetchPasskeys()
     } catch (error: any) {
       console.error("Passkey registration failed:", error)
-      toast.error(error.message || "Failed to register passkey.")
+      if (error?.name === 'NotAllowedError' || error?.message?.includes('cancelled')) {
+        toast.info("Passkey registration was cancelled.")
+      } else {
+        toast.error(error?.message || "Failed to register passkey.")
+      }
     } finally {
       setSaving(false)
     }
@@ -91,6 +131,107 @@ export default function StudentProfile() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  const handleCancel = () => {
+    if (profile) {
+      setFormData({
+        full_name: profile.full_name || "",
+        student_id: profile.student_id || "",
+        department: profile.department || "",
+        year: profile.year?.toString() || "",
+        section: profile.section || ""
+      })
+    }
+    setIsEditing(false)
+  }
+
+  const handlePhotoSelect = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Reset input value so re-selecting same file triggers onChange
+    e.target.value = ""
+
+    // Validate file type
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
+    const isTypeValid = validTypes.includes(file.type.toLowerCase())
+    
+    // Validate file size (5MB = 5 * 1024 * 1024 bytes)
+    const isSizeValid = file.size <= 5 * 1024 * 1024
+
+    if (!isTypeValid || !isSizeValid) {
+      toast.error("Please select a JPG, PNG, or WEBP image under 5 MB.")
+      return
+    }
+
+    // Show preview
+    const objectUrl = URL.createObjectURL(file)
+    setPreviewUrl(objectUrl)
+    setUploading(true)
+
+    try {
+      const userId = user?.id || profile?.auth_user_id
+      if (!userId) {
+        throw new Error("User authentication ID not found")
+      }
+
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'png'
+      const filePath = `${userId}/profile.${fileExt}`
+
+      // Upload file to Supabase Storage in avatars bucket
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        })
+
+      if (uploadError) throw uploadError
+
+      // Generate signed URL (10 years) for private bucket access
+      const { data: signedData, error: signedUrlError } = await supabase.storage
+        .from('avatars')
+        .createSignedUrl(filePath, 315360000)
+
+      let finalPhotoUrl = ""
+      if (!signedUrlError && signedData?.signedUrl) {
+        // Append timestamp cache buster
+        finalPhotoUrl = `${signedData.signedUrl}&t=${Date.now()}`
+      } else {
+        // Fallback to getPublicUrl
+        const { data: publicData } = supabase.storage
+          .from('avatars')
+          .getPublicUrl(filePath)
+        finalPhotoUrl = `${publicData.publicUrl}?t=${Date.now()}`
+      }
+
+      // Update profile record in database
+      const profileId = profile?.id
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          profile_photo_url: finalPhotoUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", profileId)
+
+      if (updateError) throw updateError
+
+      // Refresh context profile state immediately
+      await refreshProfile()
+      toast.success("Photo updated successfully.")
+    } catch (error: any) {
+      console.error("Error uploading photo:", error)
+      toast.error("Unable to upload profile photo. Please try again.")
+      setPreviewUrl(null)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!profile) return
@@ -107,16 +248,17 @@ export default function StudentProfile() {
           year: formData.year ? parseInt(formData.year) : null,
           section: formData.section,
           updated_at: new Date().toISOString()
-        } as any)
+        })
         .eq("id", profile.id)
 
       if (error) throw error
       
-      toast.success("Profile updated successfully")
-      
+      await refreshProfile()
+      toast.success("Profile updated successfully.")
+      setIsEditing(false)
     } catch (error: any) {
       console.error("Error updating profile:", error)
-      toast.error(error.message || "Failed to update profile")
+      toast.error(error.message || "Unable to update your profile.")
     } finally {
       setSaving(false)
     }
@@ -130,47 +272,179 @@ export default function StudentProfile() {
     )
   }
 
+  const avatarSrc = previewUrl || profile.profile_photo_url || ""
+
+  const formatYearDisplay = (yr: number | string | null | undefined) => {
+    if (!yr) return "Not set"
+    const val = yr.toString().trim()
+    if (val === "1") return "1st Year"
+    if (val === "2") return "2nd Year"
+    if (val === "3") return "3rd Year"
+    if (val === "4") return "4th Year"
+    if (val.toLowerCase().includes("year")) return val
+    return `${val}th Year`
+  }
+
+  const formatSectionDisplay = (sec: string | null | undefined) => {
+    if (!sec) return "Not set"
+    const val = sec.trim()
+    if (val.toLowerCase().startsWith("section")) return val
+    return `Section ${val}`
+  }
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-4xl mx-auto">
+    <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-5xl mx-auto">
       
+      {/* Hidden File Input */}
+      <input 
+        type="file" 
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/jpeg,image/jpg,image/png,image/webp"
+        className="hidden"
+      />
+
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Profile Settings</h1>
         <p className="text-muted-foreground mt-1">Manage your academic identity and personal information.</p>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-8">
+      <div className="grid md:grid-cols-3 gap-8 items-start">
         
-        {/* Left Column: Identity Card */}
+        {/* Left Column: NEW Profile Summary Card (Read-Only Display) */}
         <div className="space-y-6">
-          <Card className="border-none shadow-sm rounded-[2rem] overflow-hidden">
-            <div className="h-32 bg-gradient-to-r from-[#1E5EFF] to-[#4DB8FF]" />
-            <CardContent className="px-8 pb-8 pt-0 flex flex-col items-center text-center">
+          <Card className="border-none shadow-sm rounded-[2rem] overflow-hidden bg-white">
+            <CardHeader className="p-6 pb-4 border-b border-slate-100">
+              <CardTitle className="text-lg font-bold text-[#0B1E43] flex items-center gap-2">
+                <User className="h-5 w-5 text-primary" />
+                Profile Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 pt-4 space-y-6">
               
-              <div className="relative -mt-16 mb-4 group cursor-pointer">
-                <Avatar className="h-32 w-32 border-4 border-white shadow-md">
-                  <AvatarImage src={profile.profile_photo_url || ""} />
-                  <AvatarFallback className="bg-primary/10 text-primary text-3xl font-bold uppercase">
-                    {profile.full_name ? profile.full_name.charAt(0) : "S"}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Camera className="h-8 w-8 text-white" />
+              {/* Profile Photo & Name Header */}
+              <div className="flex flex-col items-center text-center">
+                <div className="relative mb-3 group cursor-pointer" onClick={handlePhotoSelect}>
+                  <Avatar className="h-28 w-28 border-4 border-slate-100 shadow-md">
+                    <AvatarImage src={avatarSrc} key={avatarSrc} alt="Profile photo" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-3xl font-bold uppercase">
+                      {profile.full_name ? profile.full_name.charAt(0) : "S"}
+                    </AvatarFallback>
+                  </Avatar>
+                  
+                  {/* Upload Overlay on Hover */}
+                  <div className={`absolute inset-0 bg-black/40 rounded-full flex flex-col items-center justify-center transition-opacity ${uploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    {uploading ? (
+                      <>
+                        <Loader2 className="h-6 w-6 text-white animate-spin mb-1" />
+                        <span className="text-[10px] text-white font-medium">Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="h-6 w-6 text-white mb-1" />
+                        <span className="text-[10px] text-white font-medium">Change</span>
+                      </>
+                    )}
+                  </div>
                 </div>
+
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handlePhotoSelect}
+                  disabled={uploading}
+                  className="rounded-full font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 text-xs mb-3"
+                >
+                  {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 text-primary" />}
+                  {uploading ? "Uploading..." : "Upload Photo"}
+                </Button>
+
+                <h2 className="text-xl font-bold text-[#0B1E43] capitalize">{profile.full_name || "Student"}</h2>
+                <p className="text-muted-foreground font-medium uppercase tracking-wider text-xs mt-0.5">
+                  {profile.role || "Student"} Account
+                </p>
               </div>
 
-              <h2 className="text-2xl font-bold text-[#0B1E43] capitalize">{profile.full_name}</h2>
-              <p className="text-muted-foreground font-medium uppercase tracking-wider text-xs mt-1">
-                {profile.role} Account
-              </p>
+              {/* Profile Details List (Read-Only) */}
+              <div className="space-y-3 pt-2 border-t border-slate-100">
+                
+                {/* 1. Full Name */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Full Name</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate">{profile.full_name || "Not set"}</p>
+                  </div>
+                </div>
+
+                {/* 2. Student ID */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <Hash className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Student ID</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate">{profile.student_id || "Not set"}</p>
+                  </div>
+                </div>
+
+                {/* 3. College Email */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">College Email</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate break-all">{profile.email || user?.email || "Not set"}</p>
+                  </div>
+                </div>
+
+                {/* 4. Branch / Department */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <Building className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Branch / Department</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate">{profile.department || "Not set"}</p>
+                  </div>
+                </div>
+
+                {/* 5. Year */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <Calendar className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Year</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate">{formatYearDisplay(profile.year)}</p>
+                  </div>
+                </div>
+
+                {/* 6. Section */}
+                <div className="flex items-start gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                  <div className="p-2 bg-primary/10 text-primary rounded-xl shrink-0 mt-0.5">
+                    <Layers className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Section</p>
+                    <p className="text-sm font-bold text-[#0B1E43] truncate">{formatSectionDisplay(profile.section)}</p>
+                  </div>
+                </div>
+
+              </div>
 
               {passkeys.length > 0 ? (
-                <div className="mt-6 flex items-center justify-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-full text-sm font-bold w-full border border-green-100">
-                  <ShieldCheck className="h-4 w-4" />
+                <div className="flex items-center justify-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-full text-xs font-bold w-full border border-green-100">
+                  <ShieldCheck className="h-3.5 w-3.5" />
                   Device Auth Enabled
                 </div>
               ) : (
-                <div className="mt-6 flex items-center justify-center gap-2 px-4 py-2 bg-slate-50 text-slate-500 rounded-full text-sm font-bold w-full border border-slate-200">
-                  <ShieldCheck className="h-4 w-4" />
+                <div className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-50 text-slate-500 rounded-full text-xs font-bold w-full border border-slate-200">
+                  <ShieldCheck className="h-3.5 w-3.5" />
                   Standard Login
                 </div>
               )}
@@ -179,19 +453,30 @@ export default function StudentProfile() {
           </Card>
         </div>
 
-        {/* Right Column: Settings Form */}
+        {/* Right Column: EXISTING PROFILE FORM & Security Settings */}
         <div className="md:col-span-2 space-y-6">
           <Card className="border-none shadow-sm rounded-[2rem]">
-            <CardHeader className="p-8 pb-4 border-b border-muted/50">
+            <CardHeader className="p-8 pb-4 border-b border-muted/50 flex flex-row items-center justify-between">
               <CardTitle className="text-xl flex items-center gap-2">
                 <User className="h-5 w-5 text-muted-foreground" />
                 Personal Information
               </CardTitle>
+              
+              {!isEditing && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setIsEditing(true)}
+                  className="rounded-full text-xs font-bold gap-2 border-primary/30 text-primary hover:bg-primary/5"
+                >
+                  <Edit3 className="h-3.5 w-3.5" /> Edit Profile
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
                 
-                {/* Non-editable fields */}
+                {/* Non-editable Email field */}
                 <div className="grid gap-6 md:grid-cols-2 p-6 bg-slate-50 rounded-2xl border border-slate-100 mb-8">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
@@ -202,7 +487,7 @@ export default function StudentProfile() {
                   </div>
                 </div>
 
-                {/* Editable fields */}
+                {/* Editable / Display fields */}
                 <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-3">
                     <label htmlFor="full_name" className="text-sm font-bold text-[#0B1E43] block mb-2">Full Name</label>
@@ -213,7 +498,8 @@ export default function StudentProfile() {
                         name="full_name"
                         value={formData.full_name} 
                         onChange={handleChange}
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
+                        disabled={!isEditing}
+                        className={`pl-11 h-12 rounded-2xl focus-visible:ring-primary/20 ${isEditing ? 'bg-[#F4F7FE] border-none' : 'bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed'}`}
                       />
                     </div>
                   </div>
@@ -227,66 +513,134 @@ export default function StudentProfile() {
                         name="student_id"
                         value={formData.student_id} 
                         onChange={handleChange}
+                        disabled={!isEditing}
                         placeholder="e.g. CS2023001"
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
+                        className={`pl-11 h-12 rounded-2xl focus-visible:ring-primary/20 ${isEditing ? 'bg-[#F4F7FE] border-none' : 'bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed'}`}
                       />
                     </div>
                   </div>
 
+                  {/* Branch / Department */}
                   <div className="space-y-3 md:col-span-2">
-                    <label htmlFor="department" className="text-sm font-bold text-[#0B1E43] block mb-2">Department</label>
+                    <label htmlFor="department" className="text-sm font-bold text-[#0B1E43] block mb-2">Branch / Department</label>
                     <div className="relative">
-                      <Building className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground" />
-                      <Input 
-                        id="department" 
-                        name="department"
-                        value={formData.department} 
-                        onChange={handleChange}
-                        placeholder="e.g. Computer Science"
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
-                      />
+                      <Building className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                      {isEditing ? (
+                        <select
+                          id="department"
+                          name="department"
+                          value={formData.department}
+                          onChange={(e) => setFormData(prev => ({ ...prev, department: e.target.value }))}
+                          className="pl-11 h-12 rounded-2xl bg-[#F4F7FE] border-none w-full text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 text-slate-900"
+                        >
+                          <option value="">Select Branch</option>
+                          <option value="Computer Science & Engineering">Computer Science & Engineering (CSE)</option>
+                          <option value="Information Technology">Information Technology (IT)</option>
+                          <option value="Electronics & Communication">Electronics & Communication (ECE)</option>
+                          <option value="Electrical & Electronics">Electrical & Electronics (EEE)</option>
+                          <option value="Mechanical Engineering">Mechanical Engineering (MECH)</option>
+                          <option value="Civil Engineering">Civil Engineering (CIVIL)</option>
+                          <option value="AI & DS">Artificial Intelligence & Data Science (AI & DS)</option>
+                          <option value="Data Science">Data Science</option>
+                        </select>
+                      ) : (
+                        <Input 
+                          id="department" 
+                          name="department"
+                          value={formData.department || "Not set"} 
+                          disabled
+                          className="pl-11 h-12 rounded-2xl bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed font-semibold"
+                        />
+                      )}
                     </div>
                   </div>
 
+                  {/* Year */}
                   <div className="space-y-3">
-                    <label htmlFor="year" className="text-sm font-bold text-[#0B1E43] block mb-2">Year of Study</label>
+                    <label htmlFor="year" className="text-sm font-bold text-[#0B1E43] block mb-2">Year</label>
                     <div className="relative">
-                      <Calendar className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground" />
-                      <Input 
-                        id="year" 
-                        name="year"
-                        type="number"
-                        min="1"
-                        max="6"
-                        value={formData.year} 
-                        onChange={handleChange}
-                        placeholder="e.g. 3"
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
-                      />
+                      <Calendar className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                      {isEditing ? (
+                        <select
+                          id="year" 
+                          name="year"
+                          value={formData.year} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, year: e.target.value }))}
+                          className="pl-11 h-12 rounded-2xl bg-[#F4F7FE] border-none w-full text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 text-slate-900"
+                        >
+                          <option value="">Select Year</option>
+                          <option value="1">1st Year</option>
+                          <option value="2">2nd Year</option>
+                          <option value="3">3rd Year</option>
+                          <option value="4">4th Year</option>
+                        </select>
+                      ) : (
+                        <Input 
+                          id="year" 
+                          name="year"
+                          value={formData.year ? `${formData.year}${formData.year === '1' ? 'st' : formData.year === '2' ? 'nd' : formData.year === '3' ? 'rd' : 'th'} Year` : "Not set"} 
+                          disabled
+                          className="pl-11 h-12 rounded-2xl bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed font-semibold"
+                        />
+                      )}
                     </div>
                   </div>
 
+                  {/* Section */}
                   <div className="space-y-3">
-                    <label htmlFor="section" className="text-sm font-bold text-[#0B1E43] block mb-2">Section / Group</label>
+                    <label htmlFor="section" className="text-sm font-bold text-[#0B1E43] block mb-2">Section</label>
                     <div className="relative">
-                      <Layers className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground" />
-                      <Input 
-                        id="section" 
-                        name="section"
-                        value={formData.section} 
-                        onChange={handleChange}
-                        placeholder="e.g. A"
-                        className="pl-11 h-12 bg-[#F4F7FE] border-none rounded-2xl focus-visible:ring-primary/20"
-                      />
+                      <Layers className="absolute left-4 top-3.5 h-4 w-4 text-muted-foreground pointer-events-none z-10" />
+                      {isEditing ? (
+                        <select
+                          id="section" 
+                          name="section"
+                          value={formData.section} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, section: e.target.value }))}
+                          className="pl-11 h-12 rounded-2xl bg-[#F4F7FE] border-none w-full text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 text-slate-900"
+                        >
+                          <option value="">Select Section</option>
+                          <option value="A">Section A</option>
+                          <option value="B">Section B</option>
+                          <option value="C">Section C</option>
+                          <option value="D">Section D</option>
+                          <option value="E">Section E</option>
+                          <option value="F">Section F</option>
+                        </select>
+                      ) : (
+                        <Input 
+                          id="section" 
+                          name="section"
+                          value={formData.section ? `Section ${formData.section}` : "Not set"} 
+                          disabled
+                          className="pl-11 h-12 rounded-2xl bg-slate-50 border-slate-100 text-slate-700 cursor-not-allowed font-semibold"
+                        />
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-muted/50 flex justify-end">
-                  <Button type="submit" disabled={saving} className="rounded-full px-8 h-12 text-sm font-bold">
-                    {saving ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving...</> : "Save Changes"}
-                  </Button>
-                </div>
+                {/* Form Buttons */}
+                {isEditing && (
+                  <div className="pt-6 border-t border-muted/50 flex justify-end gap-3">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={handleCancel}
+                      disabled={saving}
+                      className="rounded-full px-6 h-12 text-sm font-bold border-slate-200 text-slate-700 hover:bg-slate-100 gap-2"
+                    >
+                      <X className="h-4 w-4" /> Cancel
+                    </Button>
+                    <Button 
+                      type="submit" 
+                      disabled={saving} 
+                      className="rounded-full px-8 h-12 text-sm font-bold gap-2"
+                    >
+                      {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : <><Check className="h-4 w-4" /> Save Changes</>}
+                    </Button>
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

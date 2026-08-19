@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { createNotification } from "@/lib/notifications"
+import { isAssignmentTargetedToStudent } from "@/lib/targeting"
 
 export function useSmartReminders() {
   const { profile } = useAuth()
@@ -22,16 +23,18 @@ export function useSmartReminders() {
 
         const subjectIds = enrollments.map(e => e.subject_id)
 
-        // 2. Get active assignments for those subjects
+        // 2. Get active assignments targeted to student's academic profile for those subjects
         const now = new Date()
         const fortyEightHoursFromNow = new Date(now.getTime() + 48 * 60 * 60 * 1000)
 
-        const { data: assignments } = await supabase
+        const { data: rawAssignments } = await supabase
           .from("assignments")
-          .select("id, title, deadline, subject_id")
+          .select("id, title, deadline, subject_id, target_branch, target_year, all_sections, assignment_sections(section)")
           .in("subject_id", subjectIds)
           .gte("deadline", now.toISOString())
           .lte("deadline", fortyEightHoursFromNow.toISOString())
+
+        const assignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, profile))
 
         if (!assignments || assignments.length === 0) {
           setRemindersChecked(true)

@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom"
 import { Toaster } from "@/components/ui/sonner"
+import { Button } from "@/components/ui/button"
+import EduTrackLogo from "@/components/EduTrackLogo"
 
 // Contexts & Protection
 import { AuthProvider } from "./contexts/AuthContext"
@@ -26,6 +28,8 @@ import StudentAnalytics from "./pages/student/Analytics"
 // Professor Pages
 import ProfessorDashboard from "./pages/professor/Dashboard"
 import ProfessorClasses from "./pages/professor/Classes"
+import ProfessorSubjects from "./pages/professor/Subjects"
+import ProfessorSubjectDetail from "./pages/professor/SubjectDetail"
 import ProfessorAssignments from "./pages/professor/Assignments"
 import ProfessorCreateAssignment from "./pages/professor/CreateAssignment"
 import ProfessorAssignmentSubmissions from "./pages/professor/AssignmentSubmissions"
@@ -35,11 +39,14 @@ import SimilarityReport from "./pages/professor/SimilarityReport"
 import ProfessorProfile from "./pages/professor/Profile"
 import ProfessorAnalytics from "./pages/professor/Analytics"
 
+import ErrorBoundary from "./components/ErrorBoundary"
+
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
           {/* Default route redirects to login */}
           <Route path="/" element={<Navigate to="/login" replace />} />
 
@@ -60,8 +67,6 @@ function App() {
               <Route path="/student/credits" element={<StudentCredits />} />
               <Route path="/student/analytics" element={<StudentAnalytics />} />
               <Route path="/student/profile" element={<StudentProfile />} />
-              {/* Placeholders for other routes */}
-              <Route path="/student/subjects" element={<div className="p-4">Subjects Placeholder</div>} />
             </Route>
           </Route>
 
@@ -70,23 +75,40 @@ function App() {
             <Route element={<DashboardLayout type="professor" />}>
               <Route path="/professor/dashboard" element={<ProfessorDashboard />} />
               <Route path="/professor/classes" element={<ProfessorClasses />} />
+              {/* Subjects — primary professor workflow */}
+              <Route path="/professor/subjects" element={<ProfessorSubjects />} />
+              <Route path="/professor/subjects/:subjectId" element={<ProfessorSubjectDetail />} />
+              <Route path="/professor/subjects/:subjectId/assignments/create" element={<ProfessorCreateAssignment />} />
+              {/* Assignments */}
               <Route path="/professor/assignments" element={<ProfessorAssignments />} />
               <Route path="/professor/assignments/create" element={<ProfessorCreateAssignment />} />
               <Route path="/professor/assignments/:id/submissions" element={<ProfessorAssignmentSubmissions />} />
+              {/* Submissions */}
               <Route path="/professor/submissions" element={<ProfessorAllSubmissions />} />
               <Route path="/professor/submissions/:id/review" element={<ProfessorReviewSubmission />} />
               <Route path="/professor/submissions/:id/similarity" element={<SimilarityReport />} />
+              {/* Other */}
               <Route path="/professor/analytics" element={<ProfessorAnalytics />} />
               <Route path="/professor/profile" element={<ProfessorProfile />} />
             </Route>
           </Route>
 
           {/* Catch-all 404 */}
-          <Route path="*" element={<div className="flex h-screen items-center justify-center text-2xl font-bold">404 - Page Not Found</div>} />
+          <Route path="*" element={
+            <div className="flex h-screen flex-col items-center justify-center gap-4 text-center p-4 bg-[#F4F7FE]">
+              <EduTrackLogo size="xl" />
+              <h1 className="text-3xl font-extrabold text-[#0B1E43] mt-2">404 - Page Not Found</h1>
+              <p className="text-muted-foreground max-w-sm">The page you are looking for does not exist or has been moved.</p>
+              <Button asChild className="rounded-full px-8 font-bold bg-[#1E5EFF] mt-2">
+                <Link to="/">Back to Home</Link>
+              </Button>
+            </div>
+          } />
         </Routes>
-      </AuthProvider>
-      <Toaster />
-    </BrowserRouter>
+        </AuthProvider>
+        <Toaster />
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }
 

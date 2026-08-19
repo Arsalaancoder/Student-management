@@ -2,8 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
 import mammoth from 'mammoth';
+
+// Use createRequire to import CJS module (pdf-parse) in an ESM context
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
 
 // Load environment variables from the parent directory's .env.local
 dotenv.config({ path: '../.env.local' });

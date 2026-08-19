@@ -16,6 +16,8 @@ interface AssignmentData {
   subjectName: string
   deadline: string
   maxMarks: number
+  maxCredits: number
+  targetYear: number | null
   submissionsCount: number
   pendingReviewsCount: number
 }
@@ -42,6 +44,9 @@ export default function ProfessorAssignments() {
             title,
             deadline,
             max_marks,
+            max_credits,
+            target_year,
+            subject_name,
             subjects (name)
           `)
           .eq("created_by", profile.id)
@@ -73,9 +78,11 @@ export default function ProfessorAssignments() {
           const formatted = assignmentsData.map(a => ({
             id: a.id,
             title: a.title,
-            subjectName: (a.subjects as any)?.name || "Unknown Subject",
+            subjectName: a.subject_name || (a.subjects as any)?.name || "General",
             deadline: a.deadline,
             maxMarks: a.max_marks || 100,
+            maxCredits: a.max_credits || 0,
+            targetYear: a.target_year ?? null,
             submissionsCount: subCountMap[a.id] || 0,
             pendingReviewsCount: pendingCountMap[a.id] || 0
           }))
@@ -96,6 +103,17 @@ export default function ProfessorAssignments() {
     a.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
     a.subjectName.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  const formatYearLabel = (year: number | null) => {
+    if (!year) return "All Years"
+    switch (year) {
+      case 1: return "1st Year"
+      case 2: return "2nd Year"
+      case 3: return "3rd Year"
+      case 4: return "4th Year"
+      default: return `${year}th Year`
+    }
+  }
 
   if (loading) {
     return (
@@ -162,17 +180,27 @@ export default function ProfessorAssignments() {
                     
                     {/* Main Info */}
                     <div className="flex-1 p-6 md:p-8">
-                      <div className="flex items-center gap-3 mb-3">
+                      <div className="flex items-center gap-3 mb-3 flex-wrap">
                         <span className="px-3 py-1 bg-muted text-muted-foreground rounded-lg text-xs font-bold tracking-wide uppercase">
                           {assignment.subjectName}
+                        </span>
+                        <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold tracking-wide">
+                          For: {formatYearLabel(assignment.targetYear)}
                         </span>
                         <span className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-lg ${isPastDue ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
                           <Calendar className="h-3.5 w-3.5" />
                           {isPastDue ? 'Closed' : 'Active'} &bull; Due {new Date(assignment.deadline).toLocaleDateString()}
                         </span>
+                        <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg">
+                          Published
+                        </span>
                       </div>
                       <h3 className="text-xl font-bold text-[#0B1E43] mb-1">{assignment.title}</h3>
-                      <p className="text-sm text-muted-foreground font-medium">Max Marks: {assignment.maxMarks}</p>
+                      <div className="flex items-center gap-3 text-sm text-muted-foreground font-medium">
+                        <span>{assignment.maxMarks} Marks</span>
+                        <span>&bull;</span>
+                        <span>{assignment.maxCredits} Credits</span>
+                      </div>
                     </div>
 
                     {/* Stats & Actions */}

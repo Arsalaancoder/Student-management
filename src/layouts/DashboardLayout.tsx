@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
 import { 
-  BookOpen, 
   LayoutDashboard, 
   FileText, 
   CheckSquare, 
@@ -11,8 +10,7 @@ import {
   User,
   Plus,
   Zap,
-  BarChart3,
-  Bell
+  BarChart3
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -28,6 +26,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useAuth } from "@/contexts/AuthContext"
 import NotificationBell from "@/components/notifications/NotificationBell"
+import EduTrackLogo from "@/components/EduTrackLogo"
 
 interface SidebarItem {
   icon: React.ElementType
@@ -50,7 +49,6 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
 
   const professorLinks: SidebarItem[] = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/professor/dashboard" },
-    { icon: BookOpen, label: "My Subjects", href: "/professor/subjects" },
     { icon: FileText, label: "Assignments", href: "/professor/assignments" },
     { icon: CheckSquare, label: "Submissions", href: "/professor/submissions" },
     { icon: BarChart3, label: "Analytics", href: "/professor/analytics" },
@@ -76,13 +74,9 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
         fixed inset-y-4 left-4 z-50 w-64 bg-white rounded-[2rem] shadow-sm transform transition-transform duration-200 ease-in-out md:translate-x-0 md:static md:flex-shrink-0 flex flex-col
         ${sidebarOpen ? "translate-x-0" : "-translate-x-[120%]"}
       `}>
-        <div className="h-24 flex items-center px-8">
-          <Link to={`/${type}/dashboard`} className="flex items-center gap-3 font-bold text-xl text-foreground">
-            <div className="flex -space-x-2">
-              <div className="h-6 w-6 rounded-full bg-accent mix-blend-multiply" />
-              <div className="h-6 w-6 rounded-full bg-cyan-400 mix-blend-multiply" />
-            </div>
-            <span>Smart Portal</span>
+        <div className="h-24 flex items-center px-6">
+          <Link to={`/${type}/dashboard`}>
+            <EduTrackLogo size="md" />
           </Link>
         </div>
 
@@ -138,7 +132,7 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
           <div className="flex items-center gap-4 sm:gap-6">
             {type === "professor" && (
               <Button asChild variant="ghost" className="relative h-11 px-4 rounded-full bg-[#FCE8F3] text-[#D84C93] hover:bg-[#FCE8F3]/80 hover:text-[#D84C93] font-semibold gap-2 hidden lg:flex shadow-sm">
-                <Link to="/professor/subjects">
+                <Link to="/professor/assignments/create">
                   <Plus className="h-4 w-4" />
                   Create Assignment
                 </Link>

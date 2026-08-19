@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import AIPanel from "@/components/ai/AIPanel"
 import { invokeAIAssistant } from "@/lib/ai"
 import { createNotification } from "@/lib/notifications"
+import { isAssignmentTargetedToStudent } from "@/lib/targeting"
 
 export default function AssignmentDetails() {
   const { id } = useParams()
@@ -43,12 +44,21 @@ export default function AssignmentDetails() {
           .select(`
             *,
             subjects (name),
-            profiles:created_by (full_name)
+            profiles:created_by (full_name),
+            assignment_sections (section)
           `)
           .eq("id", id)
           .single()
           
         if (assignmentError) throw assignmentError
+
+        if (!isAssignmentTargetedToStudent(assignmentData, profile)) {
+          console.warn("[Security] Student attempted to access assignment not targeted to their academic profile.")
+          setAssignment(null)
+          setLoading(false)
+          return
+        }
+
         setAssignment(assignmentData)
 
         // 2. Fetch student's submission
@@ -411,7 +421,7 @@ export default function AssignmentDetails() {
         <div>
           <div className="flex items-center gap-3 mb-2">
             <span className="px-3 py-1 bg-primary/10 text-primary rounded-lg text-xs font-bold tracking-wide uppercase">
-              {assignment.subjects?.name}
+              {assignment.subject_name || assignment.subjects?.name || "General"}
             </span>
             {submission && (
               <span className={`px-3 py-1 rounded-lg text-xs font-bold tracking-wide uppercase ${

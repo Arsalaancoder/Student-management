@@ -2,19 +2,29 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import type { Session, User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
-import type { Database } from "@/types/database.types"
+import { getCurrentUserProfile, type Profile } from "@/lib/auth"
 
-type Profile = Database["public"]["Tables"]["profiles"]["Row"]
+export interface LoginResult {
+  success: boolean
+  user?: User
+  profile?: Profile
+  role?: string
+  missingProfile?: boolean
+  error?: any
+}
 
 interface AuthContextType {
   session: Session | null
   user: User | null
   profile: Profile | null
   loading: boolean
+  profileError: boolean
   isWebAuthnSupported: boolean
+  loginWithEmail: (email: string, password: string) => Promise<LoginResult>
   signOut: () => Promise<void>
   registerPasskey: () => Promise<any>
   loginWithPasskey: () => Promise<any>
+  refreshProfile: () => Promise<void>
 }
 
 const isWebAuthnSupported = typeof window !== 'undefined' && window.PublicKeyCredential !== undefined;
@@ -24,10 +34,13 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   loading: true,
+  profileError: false,
   isWebAuthnSupported,
+  loginWithEmail: async () => ({ success: false }),
   signOut: async () => {},
   registerPasskey: async () => {},
-  loginWithPasskey: async () => {}
+  loginWithPasskey: async () => {},
+  refreshProfile: async () => {}
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -35,27 +48,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileError, setProfileError] = useState(false)
+
+  const loadUserProfile = async (userId: string) => {
+    setProfileError(false)
+    const res = await getCurrentUserProfile(userId)
+    if (res.profile) {
+      setProfile(res.profile)
+      setProfileError(false)
+    } else {
+      setProfile(null)
+      setProfileError(true)
+    }
+    setLoading(false)
+    return res.profile
+  }
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check initial session on app mount
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchProfile(session.user.id)
+        await loadUserProfile(session.user.id)
       } else {
+        setProfile(null)
         setLoading(false)
       }
     })
 
-    // Listen for auth changes
+    // Listen for authentication changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
-        fetchProfile(session.user.id)
+        await loadUserProfile(session.user.id)
       } else {
         setProfile(null)
         setLoading(false)
@@ -65,30 +94,105 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const fetchProfile = async (userId: string) => {
+  const loginWithEmail = async (email: string, password: string): Promise<LoginResult> => {
+    setLoading(true)
+    setProfileError(false)
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("auth_user_id", userId)
-        .single()
+      // 1. Authenticate with Supabase Auth
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-      if (error) throw error
-      setProfile(data)
-    } catch (error) {
-      console.error("Error fetching profile:", error)
-    } finally {
+      if (authError) {
+        setLoading(false)
+        return { success: false, error: authError }
+      }
+
+      if (!data.session || !data.user) {
+        setLoading(false)
+        return { success: false, error: new Error("Authentication failed. No valid session returned.") }
+      }
+
+      // 2. Query Profile using reusable getCurrentUserProfile function
+      const res = await getCurrentUserProfile(data.user.id)
+
+      if (!res.profile) {
+        console.error("Missing profile for authenticated user:", {
+          userId: data.user.id,
+          email: data.user.email,
+          error: res.error
+        })
+        setProfileError(true)
+        setLoading(false)
+        return { 
+          success: false, 
+          missingProfile: true, 
+          error: new Error("Your account was authenticated, but your profile could not be found. Please contact support.") 
+        }
+      }
+
+      // 3. Validate Role
+      if (!res.profile.role || (res.profile.role !== 'student' && res.profile.role !== 'professor')) {
+        setLoading(false)
+        return {
+          success: false,
+          error: new Error("Your account does not have a valid EduTrack role.")
+        }
+      }
+
+      // Update State
+      setSession(data.session)
+      setUser(data.user)
+      setProfile(res.profile)
+      setProfileError(false)
       setLoading(false)
+
+      return {
+        success: true,
+        user: data.user,
+        profile: res.profile,
+        role: res.profile.role
+      }
+    } catch (err: any) {
+      setLoading(false)
+      return { success: false, error: err }
+    }
+  }
+
+  const refreshProfile = async () => {
+    if (user?.id) {
+      await loadUserProfile(user.id)
     }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    setLoading(true)
+    try {
+      await supabase.auth.signOut()
+    } finally {
+      setSession(null)
+      setUser(null)
+      setProfile(null)
+      setProfileError(false)
+      setLoading(false)
+    }
   }
 
   const registerPasskey = async () => {
-    // Requires a logged-in user session
-    return await supabase.auth.registerPasskey()
+    try {
+      if (typeof (supabase.auth as any).registerPasskey === 'function') {
+        const res = await (supabase.auth as any).registerPasskey()
+        if (!res.error) return res
+        console.warn("registerPasskey returned error, trying MFA enroll fallback:", res.error)
+      }
+      return await supabase.auth.mfa.enroll({
+        factorType: 'webauthn',
+        friendlyName: 'EduTrack Passkey'
+      })
+    } catch (err: any) {
+      return { data: null, error: err }
+    }
   }
 
   const loginWithPasskey = async () => {
@@ -96,7 +200,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, isWebAuthnSupported, signOut, registerPasskey, loginWithPasskey }}>
+    <AuthContext.Provider value={{ 
+      session, 
+      user, 
+      profile, 
+      loading, 
+      profileError, 
+      isWebAuthnSupported, 
+      loginWithEmail, 
+      signOut, 
+      registerPasskey, 
+      loginWithPasskey, 
+      refreshProfile 
+    }}>
       {children}
     </AuthContext.Provider>
   )
@@ -109,3 +225,5 @@ export const useAuth = () => {
   }
   return context
 }
+
+
