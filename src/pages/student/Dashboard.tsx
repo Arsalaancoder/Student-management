@@ -265,9 +265,9 @@ export default function StudentDashboard() {
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
       
       {/* Welcome Banner */}
-      <div className="bg-[#E6F0FF] rounded-[2.5rem] p-8 md:p-12 relative overflow-hidden flex flex-col md:flex-row items-center justify-between mt-2">
-        <div className="relative z-10 max-w-lg mb-8 md:mb-0">
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-[#0B1E43]">
+      <div className="bg-[#E6F0FF] rounded-[1.8rem] sm:rounded-[2.5rem] p-6 sm:p-8 md:p-12 relative overflow-hidden flex flex-col md:flex-row items-center justify-between mt-2">
+        <div className="relative z-10 max-w-lg mb-6 md:mb-0">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight mb-4 text-[#0B1E43]">
             Welcome back <span className="bg-[#8BB1FF] text-white px-3 py-1 rounded-xl inline-block mt-1 capitalize">{profile?.full_name?.split(' ')[0] || "Student"}</span>
           </h1>
           <p className="text-muted-foreground md:text-lg">
