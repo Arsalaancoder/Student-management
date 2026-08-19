@@ -62,35 +62,38 @@ export default function Login() {
 
     setLoading(true)
     try {
-      const { data, error } = await loginWithPasskey()
+      // Pass email if user entered it in the input
+      const { data, error } = await loginWithPasskey(email.trim() || undefined)
 
       if (error) {
         const errorMsg = error.message || ""
         if (error.name === 'NotAllowedError' || errorMsg.includes('cancelled') || errorMsg.includes('abort') || errorMsg.includes('not allowed')) {
-          toast.info("Passkey login was cancelled. Please sign in with your email and password.")
+          toast.info("Passkey sign-in was cancelled.")
         } else if (errorMsg.toLowerCase().includes("disabled") || errorMsg.toLowerCase().includes("webauthn")) {
           toast.error("Passkey authentication is currently disabled in Supabase Auth settings. Please sign in using email & password.")
+        } else if (errorMsg.toLowerCase().includes("not found") || errorMsg.toLowerCase().includes("no passkey") || errorMsg.toLowerCase().includes("invalid_grant")) {
+          toast.error("No passkey was found for this device or account. Please register a passkey in your Profile settings first, or sign in using your password.")
         } else {
-          toast.error(error.message || "No passkey found for this device. Please sign in with your email and password.")
+          toast.error(errorMsg || "Passkey sign-in failed. Please sign in using your password.")
         }
         console.error("Passkey error:", error)
         setLoading(false)
         return
       }
 
-      if (data?.user || data?.session?.user) {
-        const loggedInUser = data.user || data.session.user
+      const loggedInUser = data?.user || data?.session?.user
+      if (loggedInUser) {
         const res = await getCurrentUserProfile(loggedInUser.id)
         toast.success("Successfully logged in with Passkey!")
         const targetPath = res.profile?.role === "professor" ? "/professor/dashboard" : "/student/dashboard"
         navigate(targetPath, { replace: true })
       } else {
-        toast.error("Passkey authentication did not return user details. Please try again.")
+        toast.error("Passkey authentication succeeded, but user data was not returned. Please sign in with password.")
         setLoading(false)
       }
     } catch (error: any) {
       if (error?.name === 'NotAllowedError' || error?.message?.includes('cancelled')) {
-        toast.info("Passkey login was cancelled. Please sign in with your email and password.")
+        toast.info("Passkey sign-in was cancelled.")
       } else {
         toast.error(error?.message || "Passkey login failed. Please sign in using your email and password.")
       }

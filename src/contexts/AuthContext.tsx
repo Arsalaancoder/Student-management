@@ -23,7 +23,7 @@ interface AuthContextType {
   loginWithEmail: (email: string, password: string) => Promise<LoginResult>
   signOut: () => Promise<void>
   registerPasskey: () => Promise<any>
-  loginWithPasskey: () => Promise<any>
+  loginWithPasskey: (email?: string) => Promise<any>
   refreshProfile: () => Promise<void>
 }
 
@@ -195,8 +195,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const loginWithPasskey = async () => {
-    return await supabase.auth.signInWithPasskey()
+  const loginWithPasskey = async (email?: string) => {
+    try {
+      if (typeof (supabase.auth as any).signInWithPasskey === 'function') {
+        const options = email ? { email } : undefined
+        return await (supabase.auth as any).signInWithPasskey(options)
+      }
+      return { data: null, error: new Error("Passkey login is not supported by your browser.") }
+    } catch (err: any) {
+      return { data: null, error: err }
+    }
   }
 
   return (
