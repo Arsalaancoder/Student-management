@@ -8,7 +8,6 @@ import { toast } from "sonner"
 import { useAuth } from "@/contexts/AuthContext"
 import { getCurrentUserProfile } from "@/lib/auth"
 import EduTrackLogo from "@/components/EduTrackLogo"
-import IntroVideo from "@/components/IntroVideo"
 
 export default function Login() {
   const [email, setEmail] = useState("")
@@ -16,19 +15,6 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { isWebAuthnSupported, loginWithPasskey, loginWithEmail } = useAuth()
-
-  const [showIntro, setShowIntro] = useState(() => {
-    return !sessionStorage.getItem("edutrack_intro_seen")
-  })
-
-  const handleIntroComplete = () => {
-    sessionStorage.setItem("edutrack_intro_seen", "true")
-    setShowIntro(false)
-  }
-
-  if (showIntro) {
-    return <IntroVideo onComplete={handleIntroComplete} />
-  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
