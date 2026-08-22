@@ -252,6 +252,7 @@ export type Database = {
       }
       notifications: {
         Row: {
+          assignment_id: string | null
           created_at: string
           id: string
           is_read: boolean | null
@@ -261,6 +262,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          assignment_id?: string | null
           created_at?: string
           id?: string
           is_read?: boolean | null
@@ -270,6 +272,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          assignment_id?: string | null
           created_at?: string
           id?: string
           is_read?: boolean | null

@@ -12,6 +12,7 @@ import {
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { createNotificationForTargetGroup } from "@/lib/notifications"
+import { triggerAssignmentEmailNotification } from "@/lib/emailNotifications"
 
 interface FormErrors {
   title?: string
@@ -250,18 +251,40 @@ export default function CreateAssignment() {
 
       setUploadProgress(100)
 
-      // Notify targeted students
+      // Notify targeted students (In-app notifications)
+      const professorName = profile.full_name || "Professor"
       await createNotificationForTargetGroup(
         targetBranchStr,
         targetYearNum,
         null,
-        "New Assignment Posted",
-        `A new assignment "${trimmedTitle}" for ${trimmedSubjectName} has been posted.`,
+        "New Assignment",
+        `${professorName} posted "${trimmedTitle}"`,
         "new_assignment",
-        !isAllSections ? selectedSections : null
+        !isAllSections ? selectedSections : null,
+        newAssignment.id
       )
 
-      toast.success("Assignment created and published successfully!")
+      // Automatically send email notifications to eligible registered students
+      try {
+        toast.info("Assignment created. Email notifications: Sending...")
+        const emailResult = await triggerAssignmentEmailNotification(newAssignment.id)
+        
+        if (emailResult.sent_count > 0 && emailResult.failed_count > 0) {
+          toast.success(`Email notifications: ${emailResult.sent_count} sent, ${emailResult.failed_count} failed`)
+        } else if (emailResult.sent_count > 0) {
+          toast.success(`Email notifications: ${emailResult.sent_count} sent`)
+        } else if (emailResult.failed_count > 0) {
+          toast.warning(`Email notifications: 0 sent, ${emailResult.failed_count} failed (${emailResult.message})`)
+        } else if (emailResult.total_eligible === 0) {
+          toast.info("Assignment posted. No eligible students found for selected targeting criteria.")
+        } else {
+          toast.success("Assignment posted successfully.")
+        }
+      } catch (emailErr) {
+        console.warn("Email notification processing error:", emailErr)
+        toast.success("Assignment posted successfully.")
+      }
+
       navigate("/professor/assignments")
 
     } catch (err: any) {

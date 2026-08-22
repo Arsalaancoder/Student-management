@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.edutrack.studentmanagement",
+      "sha256_cert_fingerprints": [
+        "D7:94:5D:88:45:10:97:F8:CA:FE:95:06:31:DB:54:AF:80:83:41:72:7A:B6:97:2F:13:60:0B:82:32:A5:86:21"
+      ]
+    }
+  }
+]

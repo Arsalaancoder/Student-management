@@ -24,7 +24,7 @@ export default function AuthLayout() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#F0F4F8] md:p-8 lg:p-12">
+    <div className="min-h-screen flex flex-col md:flex-row bg-[#F0F4F8] md:p-8 lg:p-12 relative">
       <div className="flex-1 flex w-full max-w-6xl mx-auto bg-white md:rounded-[2.5rem] shadow-2xl overflow-hidden relative">
         
         {/* Left Branding Section - Clinicaly Style */}

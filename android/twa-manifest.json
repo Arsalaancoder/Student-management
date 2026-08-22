@@ -1,0 +1,42 @@
+{
+  "packageId": "com.edutrack.studentmanagement",
+  "host": "student-management-swart-one.vercel.app",
+  "name": "EduTrack Academic Portal",
+  "launcherName": "EduTrack",
+  "display": "standalone",
+  "themeColor": "#0B1E43",
+  "themeColorDark": "#000000",
+  "navigationColor": "#0F172A",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#0F172A",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "http://localhost:8080/icon-512.png",
+  "maskableIconUrl": "http://localhost:8080/icon-maskable.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "edutrack"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 2,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "minSdkVersion": 21,
+  "orientation": "default",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": [],
+  "appVersion": "1.0.0"
+}

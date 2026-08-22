@@ -99,10 +99,18 @@ export default function ProfessorAssignments() {
     fetchAssignments()
   }, [profile])
 
-  const filteredAssignments = assignments.filter(a => 
-    a.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    a.subjectName.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredAssignments = assignments.filter(a => {
+    if (!searchQuery || !searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase().trim()
+    const titleMatch = (a.title || "").toLowerCase().includes(q)
+    const subjectMatch = (a.subjectName || "").toLowerCase().includes(q)
+    const yearMatch = formatYearLabel(a.targetYear).toLowerCase().includes(q)
+    const isPastDue = new Date(a.deadline) < new Date()
+    const statusMatch = isPastDue ? "closed past due".includes(q) : "active published".includes(q)
+    const marksMatch = `${a.maxMarks || ""}`.includes(q)
+
+    return titleMatch || subjectMatch || yearMatch || statusMatch || marksMatch
+  })
 
   const formatYearLabel = (year: number | null) => {
     if (!year) return "All Years"
@@ -140,20 +148,20 @@ export default function ProfessorAssignments() {
       
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Assignments Management</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43] dark:text-white">Assignments Management</h1>
           <p className="text-muted-foreground mt-1">Create, edit, and track assignment progress across your classes.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
-              placeholder="Search assignments..." 
-              className="pl-9 bg-white border-muted/50 rounded-2xl h-11 focus-visible:ring-primary/20"
+              placeholder="Search by title, subject, year, status..." 
+              className="pl-10 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-2xl h-11 focus-visible:ring-primary/20"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <Button asChild className="h-11 rounded-2xl px-6 font-bold shadow-sm">
+          <Button asChild className="h-11 rounded-2xl px-6 font-bold shadow-sm bg-[#1E5EFF] hover:bg-blue-700">
             <Link to="/professor/assignments/create">
               <Plus className="mr-2 h-4 w-4" /> Create Assignment
             </Link>

@@ -50,7 +50,7 @@ export default function ProfessorDashboard() {
     try {
       setLoading(true)
       setDashboardError(null)
-      
+
       // 1. Fetch Subjects Count
       const { count: subjectsCount } = await supabase
         .from("subjects")
@@ -125,12 +125,18 @@ export default function ProfessorDashboard() {
         })
       }
 
+      // 5. Fetch Total Students Count dynamically
+      const { count: totalStudentsCount } = await supabase
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("role", "student")
+
       setStats({
         totalSubjects: subjectsCount || 0,
         activeAssignments: activeAssigCount || 0,
         totalSubmissions: subsCount,
         pendingReviews: pendingCount,
-        totalStudents: 0
+        totalStudents: totalStudentsCount || 0
       })
       setRecentActivity(formattedActivity)
 
@@ -167,14 +173,14 @@ export default function ProfessorDashboard() {
   const getRelativeTime = (dateString: string) => {
     const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
     const daysDifference = Math.round((new Date(dateString).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-    
+
     if (daysDifference === 0) {
-        const hoursDifference = Math.round((new Date(dateString).getTime() - new Date().getTime()) / (1000 * 60 * 60));
-        if (hoursDifference === 0) {
-            const minutesDifference = Math.round((new Date(dateString).getTime() - new Date().getTime()) / (1000 * 60));
-            return rtf.format(minutesDifference, 'minute');
-        }
-        return rtf.format(hoursDifference, 'hour');
+      const hoursDifference = Math.round((new Date(dateString).getTime() - new Date().getTime()) / (1000 * 60 * 60));
+      if (hoursDifference === 0) {
+        const minutesDifference = Math.round((new Date(dateString).getTime() - new Date().getTime()) / (1000 * 60));
+        return rtf.format(minutesDifference, 'minute');
+      }
+      return rtf.format(hoursDifference, 'hour');
     }
     return rtf.format(daysDifference, 'day');
   }
@@ -199,7 +205,7 @@ export default function ProfessorDashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
-      
+
       {/* Welcome Banner */}
       <div className="bg-[#1E5EFF] rounded-[2.5rem] p-6 sm:p-8 md:p-12 relative overflow-hidden flex flex-col md:flex-row items-center justify-between mt-2 text-white shadow-md gap-6">
         <div className="relative z-10 max-w-lg mb-4 md:mb-0 w-full">
@@ -221,13 +227,13 @@ export default function ProfessorDashboard() {
 
         {/* Professor Classroom Illustration */}
         <div className="relative z-10 w-full max-w-[260px] sm:max-w-xs md:max-w-sm h-auto flex items-center justify-center flex-shrink-0">
-          <img 
-            src="/professor-illustration.png" 
-            alt="Professor classroom illustration" 
+          <img
+            src="/professor-illustration.png"
+            alt="Professor classroom illustration"
             className="w-full h-auto max-h-56 md:max-h-64 object-contain drop-shadow-md rounded-2xl"
           />
         </div>
-        
+
         {/* Decorative elements */}
         <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
         <div className="absolute bottom-0 left-20 w-64 h-64 bg-[#0A2540]/20 rounded-full blur-2xl translate-y-1/3 pointer-events-none" />
@@ -308,10 +314,10 @@ export default function ProfessorDashboard() {
                   </Button>
                 </div>
               ) : recentActivity.length === 0 ? (
-                <EmptyState 
-                  icon={ClipboardList} 
-                  title="No submissions yet" 
-                  description="Student submissions will appear here once students submit assignments." 
+                <EmptyState
+                  icon={ClipboardList}
+                  title="No submissions yet"
+                  description="Student submissions will appear here once students submit assignments."
                 />
               ) : (
                 recentActivity.map((item) => (
@@ -339,7 +345,7 @@ export default function ProfessorDashboard() {
                         <span className="text-sm font-semibold text-primary truncate pt-0.5">{item.assignmentTitle}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100 shrink-0">
                       <span className="text-xs font-bold text-muted-foreground">{getRelativeTime(item.submittedAt)}</span>
                       <div className="flex items-center gap-2">

@@ -18,12 +18,12 @@ export default function EduTrackLogo({
   const getLogoHeight = () => {
     if (typeof size === "number") return `${size}px`
     switch (size) {
-      case "xs": return "32px"
-      case "sm": return "44px"
-      case "md": return "60px"
-      case "lg": return "80px"
-      case "xl": return "104px"
-      default: return "60px"
+      case "xs": return "40px"
+      case "sm": return "56px"
+      case "md": return "76px"
+      case "lg": return "100px"
+      case "xl": return "136px"
+      default: return "76px"
     }
   }
 
@@ -33,7 +33,7 @@ export default function EduTrackLogo({
     <div className={cn("flex items-center gap-3 select-none", className)}>
       {isIconOnly ? (
         <div 
-          className="relative overflow-hidden rounded-xl bg-white/90 p-1 flex items-center justify-center shadow-sm"
+          className="relative overflow-hidden rounded-xl bg-white/90 dark:bg-slate-800 p-1 flex items-center justify-center shadow-xs"
           style={{ height, width: height }}
         >
           <img
@@ -48,7 +48,7 @@ export default function EduTrackLogo({
           <img
             src="/edutrack-logo.png"
             alt="EduTrack"
-            className="object-contain max-w-full"
+            className="object-contain max-w-full dark:brightness-110 dark:drop-shadow-[0_0_1px_rgba(255,255,255,0.6)]"
             style={{ height }}
           />
         </div>

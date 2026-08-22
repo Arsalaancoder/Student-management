@@ -6,12 +6,12 @@ import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'module';
 import mammoth from 'mammoth';
-import { 
-  normalizeText, 
-  tokenizeText, 
-  generateNGrams, 
-  calculateJaccardSimilarity, 
-  calculateCosineSimilarity 
+import {
+  normalizeText,
+  tokenizeText,
+  generateNGrams,
+  calculateJaccardSimilarity,
+  calculateCosineSimilarity
 } from './utils/textNormalizer.js';
 
 // Use createRequire to import CJS module (pdf-parse) in an ESM context
@@ -48,7 +48,7 @@ const HIGH_THRESHOLD = 70;   // 70%
 // Extract Text from various buffer formats
 async function extractText(fileBuffer, fileName) {
   const ext = fileName.split('.').pop()?.toLowerCase();
-  
+
   if (ext === 'pdf') {
     try {
       if (typeof pdfParse === 'function') {
@@ -304,7 +304,7 @@ async function processSubmissionSimilarity(submissionId) {
   // 5. Update submission similarity score
   await supabase
     .from('submissions')
-    .update({ 
+    .update({
       similarity_score: maxSimilarity,
       updated_at: new Date().toISOString()
     })
@@ -333,7 +333,7 @@ app.post('/api/check-similarity', async (req, res) => {
         submission_id: submissionId,
         similarity_percentage: 0,
         status: 'processing_failed',
-        report_data: { 
+        report_data: {
           error: error.message || String(error),
           failed_at: new Date().toISOString()
         }
@@ -342,7 +342,7 @@ app.post('/api/check-similarity', async (req, res) => {
       console.error('Failed to log processing failure to database:', e);
     }
 
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: error.message || 'Similarity processing failed',
       status: 'processing_failed'
     });

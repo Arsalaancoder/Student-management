@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Android build outputs and gradle binaries
+android/gradle-8.7-bin.zip
+android/gradle-bin/
+android/app/build/
+android/.gradle/

@@ -213,9 +213,9 @@ export default function AssignmentDetails() {
   }
 
   const validateAndSetFile = (file: File) => {
-    // 50MB limit
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error("File is too large. Maximum size is 50MB.")
+    // 15MB limit to optimize Supabase Storage bandwidth
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("File is too large. Maximum size is 15MB.")
       return
     }
 

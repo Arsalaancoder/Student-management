@@ -36,21 +36,36 @@ export default function NotificationBell() {
       }
 
       setNotifications(data || [])
-      setUnreadCount(data?.filter(n => !n.is_read).length || 0)
+
+      const { count, error: countErr } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", profile.id)
+        .eq("is_read", false)
+
+      if (!countErr && typeof count === "number") {
+        setUnreadCount(count)
+      } else {
+        setUnreadCount(data?.filter(n => !n.is_read).length || 0)
+      }
     }
 
     fetchNotifications()
 
     // Real-time subscription
+    const channelName = `notifications_${profile.id}`
     const subscription = supabase
-      .channel('public:notifications')
+      .channel(channelName)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
         table: 'notifications',
         filter: `user_id=eq.${profile.id}`
       }, (payload) => {
-        setNotifications(prev => [payload.new, ...prev].slice(0, 20))
+        setNotifications(prev => {
+          if (prev.some(n => n.id === payload.new.id)) return prev
+          return [payload.new, ...prev].slice(0, 20)
+        })
         setUnreadCount(prev => prev + 1)
         toast(payload.new.title, {
           description: payload.new.message,
@@ -63,7 +78,7 @@ export default function NotificationBell() {
         filter: `user_id=eq.${profile.id}`
       }, (payload) => {
         setNotifications(prev => prev.map(n => n.id === payload.new.id ? payload.new : n))
-        if (payload.new.is_read && !payload.old.is_read) {
+        if (payload.new.is_read && payload.old && !payload.old.is_read) {
           setUnreadCount(prev => Math.max(0, prev - 1))
         }
       })
@@ -84,8 +99,19 @@ export default function NotificationBell() {
         console.error("Failed to mark as read", err)
       }
     }
+
     if (profile?.role === "student") {
-      navigate("/student/assignments")
+      if (n.assignment_id) {
+        navigate(`/student/assignments/${n.assignment_id}`)
+      } else {
+        navigate("/student/assignments")
+      }
+    } else if (profile?.role === "professor") {
+      if (n.assignment_id) {
+        navigate(`/professor/assignments/${n.assignment_id}/submissions`)
+      } else {
+        navigate("/professor/assignments")
+      }
     }
   }
 
@@ -166,8 +192,8 @@ export default function NotificationBell() {
                         {new Date(n.created_at).toLocaleDateString()}
                       </span>
                     </div>
-                    <p className={`text-xs mt-1 line-clamp-2 ${!n.is_read ? 'text-slate-600 font-medium' : 'text-slate-500'}`}>
-                      {n.message}
+                    <p className={`text-xs mt-1 break-words ${!n.is_read ? 'text-slate-600 font-medium' : 'text-slate-500'}`}>
+                      {n.message || n.title || "New notification received."}
                     </p>
                   </div>
                   {!n.is_read && (

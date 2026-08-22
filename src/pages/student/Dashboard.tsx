@@ -88,10 +88,11 @@ export default function StudentDashboard() {
         // 4. Fetch Enrollments with Subject Details to get Pending Assignments
         const { data: enrollments } = (await supabase
           .from("enrollments")
-          .select("subject_id")
+          .select("subject_id, subjects(id, name)")
           .eq("student_id" as any, profile.id)) as any
 
-        const subjectIds = enrollments?.map((e: any) => e.subject_id) || []
+        const subjectIds = (enrollments || []).map((e: any) => e.subject_id).filter(Boolean) as string[]
+        const subjectNames = (enrollments || []).map((e: any) => e.subjects?.name).filter(Boolean) as string[]
 
         if (subjectIds.length === 0) {
           setNotEnrolled(true)
@@ -103,10 +104,16 @@ export default function StudentDashboard() {
           // Get assignments targeted to this student's branch, year, and section
           const { data: rawAssignments } = await supabase
             .from("assignments")
-            .select("id, title, deadline, target_branch, target_year, all_sections, subject_name, subjects(name), assignment_sections(section)")
+            .select("id, title, deadline, target_branch, target_year, all_sections, subject_name, subject_id, subjects(name), assignment_sections(section)")
 
-          // Filter by targeting rules
-          const targetedAssignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, profile))
+          // Filter by targeting rules & enrollments
+          const studentProfileWithEnrollments = {
+            ...profile,
+            enrolledSubjectIds: subjectIds,
+            enrolledSubjectNames: subjectNames
+          }
+
+          const targetedAssignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, studentProfileWithEnrollments))
 
           // Get student's submissions to filter out completed ones
           const studentProfileId = profile.id
@@ -220,6 +227,45 @@ export default function StudentDashboard() {
     }
 
     fetchDashboardData()
+
+    // 1. Supabase Realtime subscription for assignments & submissions
+    const channel = supabase
+      .channel(`student_dashboard_realtime_${profile.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'assignments' },
+        () => {
+          fetchDashboardData()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'submissions', filter: `student_id=eq.${profile.id}` },
+        () => {
+          fetchDashboardData()
+        }
+      )
+      .subscribe()
+
+    // 2. Refetch when student returns/resumes app or switches back to tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDashboardData()
+      }
+    }
+
+    const handleFocus = () => {
+      fetchDashboardData()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [profile])
 
   const getDaysUntil = (dateString: string) => {

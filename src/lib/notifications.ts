@@ -1,4 +1,5 @@
 import { supabase } from "./supabase"
+import { isAssignmentTargetedToStudent } from "./targeting"
 
 export type NotificationType = 
   | 'new_assignment' 
@@ -17,7 +18,8 @@ export const createNotification = async (
   userId: string,
   title: string,
   message: string,
-  type: NotificationType
+  type: NotificationType,
+  assignmentId?: string | null
 ): Promise<boolean> => {
   try {
     const { error } = await supabase.from('notifications').insert({
@@ -25,6 +27,7 @@ export const createNotification = async (
       title,
       message,
       type,
+      assignment_id: assignmentId || null,
       is_read: false
     })
 
@@ -170,27 +173,34 @@ export const createNotificationForTargetGroup = async (
   title: string,
   message: string,
   type: NotificationType,
-  targetSections?: string[] | null
+  targetSections?: string[] | null,
+  assignmentId?: string | null
 ): Promise<{ success: boolean; sentCount: number }> => {
   try {
-    let query = supabase.from('profiles').select('id').eq('role', 'student')
-    if (targetBranch) {
-      query = query.eq('department', targetBranch)
-    }
-    if (targetYear) {
-      query = query.eq('year', targetYear)
-    }
-    if (targetSections && targetSections.length > 0) {
-      query = query.in('section', targetSections)
-    } else if (targetSection) {
-      query = query.eq('section', targetSection)
-    }
-    const { data: students, error: fetchErr } = await query
+    const { data: allStudents, error: fetchErr } = await supabase
+      .from('profiles')
+      .select('id, department, year, section')
+      .eq('role', 'student')
+
     if (fetchErr) {
       console.error("Error fetching students for notification:", fetchErr)
       return { success: false, sentCount: 0 }
     }
-    if (!students || students.length === 0) {
+
+    if (!allStudents || allStudents.length === 0) {
+      return { success: true, sentCount: 0 }
+    }
+
+    const dummyAssignment = {
+      target_branch: targetBranch,
+      target_year: targetYear,
+      all_sections: (!targetSections || targetSections.length === 0) && !targetSection,
+      assignment_sections: targetSections ? targetSections.map(s => ({ section: s })) : (targetSection ? [{ section: targetSection }] : null)
+    }
+
+    const students = allStudents.filter(s => isAssignmentTargetedToStudent(dummyAssignment, s))
+
+    if (students.length === 0) {
       return { success: true, sentCount: 0 }
     }
 
@@ -212,6 +222,7 @@ export const createNotificationForTargetGroup = async (
         title,
         message,
         type,
+        assignment_id: assignmentId || null,
         is_read: false,
       }))
 
@@ -243,3 +254,4 @@ export const createNotificationForTargetYear = async (
 ): Promise<{ success: boolean; sentCount: number }> => {
   return createNotificationForTargetGroup(null, targetYear, null, title, message, type)
 }
+

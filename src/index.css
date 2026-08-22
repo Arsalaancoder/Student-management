@@ -13,7 +13,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 224 76% 48%; /* Deep vibrant blue like the clinicaly button */
+    --primary: 224 76% 48%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96.1%;
@@ -22,7 +22,7 @@
     --muted: 214 32% 91%;
     --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 280 100% 80%; /* Frisbee pink/purple accent */
+    --accent: 280 100% 80%;
     --accent-foreground: 222.2 47.4% 11.2%;
 
     --destructive: 0 84.2% 60.2%;
@@ -32,17 +32,17 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 224 76% 48%;
 
-    --radius: 1.5rem; /* Larger border radius for that rounded look */
+    --radius: 1.5rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    --background: 222 47% 11%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222 47% 15%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222.2 84% 4.9%;
+    --popover: 222 47% 15%;
     --popover-foreground: 210 40% 98%;
 
     --primary: 217.2 91.2% 59.8%;
@@ -60,8 +60,8 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 217.2 32.6% 22%;
+    --input: 217.2 32.6% 22%;
     --ring: 212.7 26.8% 83.9%;
   }
 }
@@ -70,8 +70,98 @@
   * {
     @apply border-border;
   }
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
+}
+
+/* Custom Dark Mode Overrides for Hardcoded Light Utilities */
+.dark body {
+  background-color: #0F172A !important;
+  color: #F8FAFC !important;
+}
+
+.dark .bg-\[\#F4F7FE\],
+.dark .bg-\[\#F0F4F8\] {
+  background-color: #0F172A !important;
+}
+
+.dark aside,
+.dark header,
+.dark nav {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+}
+
+.dark .bg-white {
+  background-color: #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+.dark .text-\[\#0B1E43\] {
+  color: #F8FAFC !important;
+}
+
+.dark .bg-slate-50,
+.dark .bg-slate-50\/80,
+.dark .bg-slate-50\/50,
+.dark .bg-slate-50\/30 {
+  background-color: #0F172A !important;
+  color: #F8FAFC !important;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-50,
+.dark .border-muted\/50,
+.dark .border-slate-200 {
+  border-color: #334155 !important;
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600 {
+  color: #E2E8F0 !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-muted-foreground {
+  color: #94A3B8 !important;
+}
+
+.dark select,
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea {
+  background-color: #0F172A !important;
+  color: #F8FAFC !important;
+  border-color: #334155 !important;
+}
+
+.dark table thead tr {
+  background-color: #0F172A !important;
+  color: #94A3B8 !important;
+}
+
+.dark table tbody tr {
+  border-color: #334155 !important;
+}
+
+.dark table tbody tr:hover {
+  background-color: #1E293B !important;
+}
+
+.dark .dropdown-menu-content,
+.dark [data-radix-popper-content-wrapper] > div {
+  background-color: #1E293B !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
 }

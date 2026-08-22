@@ -1,10 +1,10 @@
 import { useState } from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
-import { 
-  LayoutDashboard, 
-  FileText, 
-  CheckSquare, 
-  Search, 
+import {
+  LayoutDashboard,
+  FileText,
+  CheckSquare,
+  Search,
   Menu,
   LogOut,
   User,
@@ -12,6 +12,7 @@ import {
   Zap,
   BarChart3,
   ShieldAlert,
+  Users,
   X
 } from "lucide-react"
 
@@ -54,7 +55,7 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
     { icon: FileText, label: "Assignments", href: "/professor/assignments" },
     { icon: CheckSquare, label: "Submissions", href: "/professor/submissions" },
     { icon: ShieldAlert, label: "Plagiarism Monitor", href: "/professor/plagiarism" },
-    { icon: BarChart3, label: "Analytics", href: "/professor/analytics" },
+    { icon: Users, label: "Student Progress", href: "/professor/student-progress" },
     { icon: User, label: "Profile", href: "/professor/profile" },
   ]
 
@@ -66,7 +67,7 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
     <div className="min-h-screen bg-[#F4F7FE] flex p-2 sm:p-4 gap-2 sm:gap-4 pb-20 md:pb-4">
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/40 backdrop-blur-xs z-40 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -81,10 +82,10 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
           <Link to={`/${type}/dashboard`} onClick={() => setSidebarOpen(false)}>
             <EduTrackLogo size="md" />
           </Link>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="md:hidden rounded-full hover:bg-slate-100" 
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden rounded-full hover:bg-slate-100"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="h-5 w-5 text-slate-500" />
@@ -93,18 +94,17 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
 
         <nav className="px-4 flex-1 space-y-1.5 mt-2 overflow-y-auto pb-4 custom-scrollbar">
           {links.map((link) => {
-            const isActive = location.pathname === link.href || 
+            const isActive = location.pathname === link.href ||
               (link.href !== `/${type}/dashboard` && location.pathname.startsWith(link.href))
             return (
               <Link
                 key={link.href}
                 to={link.href}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-4 px-5 py-3.5 rounded-2xl text-sm font-semibold transition-all ${
-                  isActive 
-                    ? "bg-[#E6F0FF] text-[#1E5EFF] shadow-xs" 
+                className={`flex items-center gap-4 px-5 py-3.5 rounded-2xl text-sm font-semibold transition-all ${isActive
+                    ? "bg-[#E6F0FF] text-[#1E5EFF] shadow-xs"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                }`}
+                  }`}
               >
                 <link.icon className="h-5 w-5 flex-shrink-0" />
                 {link.label}
@@ -119,15 +119,15 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
         {/* Top Header */}
         <header className="h-16 sm:h-24 flex items-center justify-between px-3 sm:px-6 lg:px-10 z-10 shrink-0">
           <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
-            <Button 
-              variant="ghost" 
-              size="icon" 
+            <Button
+              variant="ghost"
+              size="icon"
               className="md:hidden rounded-2xl bg-white shadow-xs h-10 w-10 shrink-0"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu className="h-5 w-5 text-slate-700" />
             </Button>
-            
+
             <div className="md:hidden flex items-center min-w-0">
               <EduTrackLogo size="xs" iconOnly />
             </div>
@@ -211,15 +211,14 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
       {/* Mobile Bottom Navigation Bar */}
       <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-100 md:hidden px-2 py-2 flex items-center justify-around shadow-lg">
         {links.map((link) => {
-          const isActive = location.pathname === link.href || 
+          const isActive = location.pathname === link.href ||
             (link.href !== `/${type}/dashboard` && location.pathname.startsWith(link.href))
           return (
             <Link
               key={link.href}
               to={link.href}
-              className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-                isActive ? "text-[#1E5EFF] font-bold" : "text-slate-500 font-medium hover:text-slate-900"
-              }`}
+              className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${isActive ? "text-[#1E5EFF] font-bold" : "text-slate-500 font-medium hover:text-slate-900"
+                }`}
             >
               <link.icon className={`h-5 w-5 ${isActive ? "scale-110" : ""} transition-transform`} />
               <span className="text-[10px] tracking-tight">{link.label}</span>

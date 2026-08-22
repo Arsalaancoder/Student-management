@@ -54,7 +54,7 @@ export default function StudentAssignments() {
       // 1. Fetch enrolled subjects
       const { data: enrollments, error: enrollErr } = await supabase
         .from("enrollments")
-        .select("subject_id")
+        .select("subject_id, subjects(id, name)")
         .eq("student_id", profile.id)
 
       if (enrollErr) {
@@ -64,13 +64,14 @@ export default function StudentAssignments() {
         return
       }
 
-      const subjectIds = enrollments?.map(e => e.subject_id) || []
+      const subjectIds = (enrollments || []).map(e => e.subject_id).filter(Boolean) as string[]
+      const subjectNames = (enrollments || []).map(e => (e.subjects as any)?.name).filter(Boolean) as string[]
       setEnrolledSubjectIds(subjectIds)
 
       // 2. Fetch assignments targeted to student's branch, year, and section or enrolled subjects
       const { data: rawAssignments, error: assignErr } = await supabase
         .from("assignments")
-        .select("id, title, deadline, max_marks, max_credits, subject_name, target_branch, target_year, all_sections, subjects(name), assignment_sections(section)")
+        .select("id, title, deadline, max_marks, max_credits, subject_name, subject_id, target_branch, target_year, all_sections, subjects(name), assignment_sections(section)")
         .order("deadline", { ascending: true })
 
       if (assignErr) {
@@ -80,8 +81,14 @@ export default function StudentAssignments() {
         return
       }
 
-      // Filter by student profile targeting
-      const allAssignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, profile))
+      // Filter by student profile targeting & enrollments
+      const studentProfileWithEnrollments = {
+        ...profile,
+        enrolledSubjectIds: subjectIds,
+        enrolledSubjectNames: subjectNames
+      }
+
+      const allAssignments = (rawAssignments || []).filter(a => isAssignmentTargetedToStudent(a, studentProfileWithEnrollments))
 
       // 3. Fetch all submissions for this student
       const studentProfileId = profile.id
@@ -144,7 +151,40 @@ export default function StudentAssignments() {
 
   useEffect(() => {
     if (!profile) return
+
     fetchAssignments()
+
+    // 1. Supabase Realtime subscription for assignments table changes
+    const channel = supabase
+      .channel(`student_assignments_realtime_${profile.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'assignments' },
+        () => {
+          fetchAssignments()
+        }
+      )
+      .subscribe()
+
+    // 2. Refetch when student returns/resumes app or switches back to tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchAssignments()
+      }
+    }
+
+    const handleFocus = () => {
+      fetchAssignments()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [profile])
 
   // Self-enrollment: student joins a subject by its code

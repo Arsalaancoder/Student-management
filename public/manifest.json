@@ -1,0 +1,32 @@
+{
+  "short_name": "EduTrack",
+  "name": "EduTrack Academic Portal",
+  "id": "/",
+  "description": "EduTrack is a next-generation academic management portal for students and professors.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#0F172A",
+  "theme_color": "#0B1E43",
+  "display": "standalone",
+  "orientation": "portrait"
+}

@@ -38,7 +38,7 @@ import ProfessorReviewSubmission from "./pages/professor/ReviewSubmission"
 import SimilarityReport from "./pages/professor/SimilarityReport"
 import PlagiarismMonitor from "./pages/professor/PlagiarismMonitor"
 import ProfessorProfile from "./pages/professor/Profile"
-import ProfessorAnalytics from "./pages/professor/Analytics"
+import StudentProgress from "./pages/professor/StudentProgress"
 
 import ErrorBoundary from "./components/ErrorBoundary"
 
@@ -90,7 +90,7 @@ function App() {
               <Route path="/professor/submissions/:id/similarity" element={<SimilarityReport />} />
               <Route path="/professor/plagiarism" element={<PlagiarismMonitor />} />
               {/* Other */}
-              <Route path="/professor/analytics" element={<ProfessorAnalytics />} />
+              <Route path="/professor/student-progress" element={<StudentProgress />} />
               <Route path="/professor/profile" element={<ProfessorProfile />} />
             </Route>
           </Route>

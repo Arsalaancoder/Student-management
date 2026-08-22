@@ -63,7 +63,7 @@ export default function StudentAnalytics() {
           console.error("Analytics assignments fetch error:", assignErr)
         }
 
-        const assignments = (rawAssignments || []).filter(a => 
+        const assignments = (rawAssignments || []).filter(a =>
           submittedAssignIds.has(a.id) || isAssignmentTargetedToStudent(a, profile)
         )
         const totalAssignmentsCount = assignments.length
@@ -77,8 +77,8 @@ export default function StudentAnalytics() {
         const returnedCount = submissions?.filter(s => s.status === 'returned').length || 0
 
         const validSimilarities = submissions?.filter(s => s.similarity_score !== null && s.similarity_score !== undefined) || []
-        const avgSimilarity = validSimilarities.length > 0 
-          ? validSimilarities.reduce((acc, curr) => acc + Number(curr.similarity_score), 0) / validSimilarities.length 
+        const avgSimilarity = validSimilarities.length > 0
+          ? validSimilarities.reduce((acc, curr) => acc + Number(curr.similarity_score), 0) / validSimilarities.length
           : 0
 
         // 3. Fetch grades for student's submissions
@@ -100,7 +100,7 @@ export default function StudentAnalytics() {
 
         const totalCredits = grades.reduce((acc, curr) => acc + (Number(curr.credits) || 0), 0)
         const validGrades = grades.filter(g => g.marks !== null && g.marks !== undefined)
-        
+
         let totalMarksPercentage = 0
         const marksOverTimeData: any[] = []
         let cumulativeCredits = 0
@@ -110,11 +110,11 @@ export default function StudentAnalytics() {
           const sub = submissionMap.get(g.submission_id)
           const assignId = sub?.assignment_id
           const assign = assignments.find(a => a.id === assignId)
-          
+
           const maxMarks = assign?.max_marks || 100
           const percentage = (Number(g.marks) / maxMarks) * 100
           totalMarksPercentage += percentage
-          
+
           marksOverTimeData.push({
             name: assign?.title || "Assignment",
             date: g.graded_at ? new Date(g.graded_at).toLocaleDateString() : "Recent",
@@ -140,11 +140,11 @@ export default function StudentAnalytics() {
           const sub = submissionMap.get(g.submission_id)
           const assignId = sub?.assignment_id
           const assign = assignments.find(a => a.id === assignId)
-          
+
           const subName = assign?.subject_name || (assign?.subjects as any)?.name || "General"
           const maxMarks = assign?.max_marks || 100
           const percentage = (Number(g.marks) / maxMarks) * 100
-          
+
           if (!subjectMap[subName]) subjectMap[subName] = { total: 0, count: 0 }
           subjectMap[subName].total += percentage
           subjectMap[subName].count += 1
@@ -173,10 +173,10 @@ export default function StudentAnalytics() {
           const mid = Math.floor(marksOverTimeData.length / 2)
           const firstHalf = marksOverTimeData.slice(0, mid)
           const secondHalf = marksOverTimeData.slice(mid)
-          
+
           const firstAvg = firstHalf.reduce((acc, curr) => acc + curr.score, 0) / firstHalf.length
           const secondAvg = secondHalf.reduce((acc, curr) => acc + curr.score, 0) / secondHalf.length
-          
+
           const diff = secondAvg - firstAvg
           if (diff > 5) {
             setInsight(`Great job! Your average score increased by ${Math.round(diff)}% compared to your earlier assignments.`)
@@ -353,7 +353,7 @@ export default function StudentAnalytics() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} tickFormatter={(value) => value.substring(0, 10) + '...'} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} domain={[0, 100]} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                       labelStyle={{ fontWeight: 'bold', color: '#0F172A', marginBottom: '4px' }}
                     />
@@ -382,14 +382,14 @@ export default function StudentAnalytics() {
                   <AreaChart data={chartData.creditsOverTime} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorCredits" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#F59E0B" stopOpacity={0}/>
+                        <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#F59E0B" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} tickFormatter={(value) => value.substring(0, 10) + '...'} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
                     <Area type="monotone" dataKey="credits" stroke="#F59E0B" strokeWidth={3} fillOpacity={1} fill="url(#colorCredits)" name="Total Credits" />
@@ -418,7 +418,7 @@ export default function StudentAnalytics() {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748B' }} domain={[0, 100]} />
-                    <Tooltip 
+                    <Tooltip
                       cursor={{ fill: '#F1F5F9' }}
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                       labelFormatter={(_, payload) => payload[0]?.payload?.fullName || "Subject"}
@@ -460,7 +460,7 @@ export default function StudentAnalytics() {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                     />
                     <Legend verticalAlign="bottom" height={36} iconType="circle" />

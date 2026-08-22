@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect } from "react"
+import { Link } from "react-router-dom"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -142,8 +143,10 @@ export default function ProfessorClasses() {
                   </div>
                 </div>
 
-                <Button variant="outline" className="w-full rounded-xl border-muted/50 hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all font-bold">
-                  View Students <ArrowRight className="ml-2 h-4 w-4" />
+                <Button asChild variant="outline" className="w-full rounded-xl border-muted/50 hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all font-bold">
+                  <Link to={`/professor/subjects/${subject.id}`}>
+                    View Students <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
                 </Button>
               </CardContent>
             </Card>
