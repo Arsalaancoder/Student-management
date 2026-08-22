@@ -37,9 +37,20 @@ interface SidebarItem {
   href: string
 }
 
+import { useEffect } from "react"
+import { registerFCMTokenForStudent } from "@/lib/fcm"
+
 export default function DashboardLayout({ type = "student" }: { type?: "student" | "professor" }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+
+  const { profile, signOut } = useAuth()
+
+  useEffect(() => {
+    if (type === "student" && profile?.id) {
+      registerFCMTokenForStudent(profile.id)
+    }
+  }, [type, profile?.id])
 
   const studentLinks: SidebarItem[] = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/student/dashboard" },
@@ -58,8 +69,6 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
     { icon: Users, label: "Student Progress", href: "/professor/student-progress" },
     { icon: User, label: "Profile", href: "/professor/profile" },
   ]
-
-  const { profile, signOut } = useAuth()
 
   const links = type === "student" ? studentLinks : professorLinks
 

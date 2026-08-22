@@ -13,6 +13,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { createNotificationForTargetGroup } from "@/lib/notifications"
 import { triggerAssignmentEmailNotification } from "@/lib/emailNotifications"
+import { triggerFCMNotification } from "@/lib/fcm"
 
 interface FormErrors {
   title?: string
@@ -283,6 +284,13 @@ export default function CreateAssignment() {
       } catch (emailErr) {
         console.warn("Email notification processing error:", emailErr)
         toast.success("Assignment posted successfully.")
+      }
+
+      // Automatically trigger FCM Push Notifications (Phase 9 & 27: Fail-safe, non-blocking)
+      try {
+        await triggerFCMNotification(newAssignment.id)
+      } catch (fcmErr) {
+        console.warn("FCM push notification dispatch warning:", fcmErr)
       }
 
       navigate("/professor/assignments")

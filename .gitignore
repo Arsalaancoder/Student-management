@@ -28,3 +28,8 @@ android/gradle-8.7-bin.zip
 android/gradle-bin/
 android/app/build/
 android/.gradle/
+
+# Firebase & Secret Files
+*google-services*.json
+*service-account*.json
+.env*.local
