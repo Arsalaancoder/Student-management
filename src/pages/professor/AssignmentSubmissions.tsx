@@ -5,10 +5,11 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, ArrowLeft, Search, FileText, CheckCircle, Clock, Sparkles } from "lucide-react"
+import { Loader2, ArrowLeft, Search, FileText, CheckCircle, Clock, Sparkles, Edit3 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import AIPanel from "@/components/ai/AIPanel"
 import { invokeAIAssistant } from "@/lib/ai"
+import EditMarksModal from "@/components/professor/EditMarksModal"
 
 interface SubmissionData {
   id: string
@@ -17,12 +18,16 @@ interface SubmissionData {
   status: string
   submittedAt: string
   similarityScore: number | null
+  marks: number | null
+  credits: number | null
+  feedback: string | null
 }
 
 interface AssignmentInfo {
   title: string
   subjectName: string
   maxMarks: number
+  maxCredits: number
   deadline: string
 }
 
@@ -35,80 +40,92 @@ export default function AssignmentSubmissions() {
   const [submissions, setSubmissions] = useState<SubmissionData[]>([])
   const [searchQuery, setSearchQuery] = useState("")
 
-  useEffect(() => {
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [selectedSubForEdit, setSelectedSubForEdit] = useState<any | null>(null)
+
+  const fetchData = async () => {
     if (!profile || !id) return
+    try {
+      setLoading(true)
 
-    const fetchData = async () => {
-      try {
-        setLoading(true)
+      // Fetch Assignment Details
+      const { data: assignData, error: assignError } = await supabase
+        .from("assignments")
+        .select("title, max_marks, max_credits, deadline, subject_name, subjects(name)")
+        .eq("id", id)
+        .single()
 
-        // Fetch Assignment Details
-        const { data: assignData, error: assignError } = await supabase
-          .from("assignments")
-          .select("title, max_marks, deadline, subject_name, subjects(name)")
-          .eq("id", id)
-          .single()
+      if (assignError) throw assignError
 
-        if (assignError) throw assignError
+      setAssignment({
+        title: assignData.title,
+        subjectName: assignData.subject_name || (assignData.subjects as any)?.name || "General",
+        maxMarks: assignData.max_marks || 100,
+        maxCredits: assignData.max_credits || 0,
+        deadline: assignData.deadline
+      })
 
-        setAssignment({
-          title: assignData.title,
-          subjectName: assignData.subject_name || (assignData.subjects as any)?.name || "General",
-          maxMarks: assignData.max_marks || 100,
-          deadline: assignData.deadline
-        })
+      // Fetch Submissions with grades
+      const { data: subsData, error: subsError } = await supabase
+        .from("submissions")
+        .select(`
+          id,
+          status,
+          submitted_at,
+          similarity_score,
+          profiles:student_id (
+            full_name,
+            student_id,
+            department,
+            year,
+            section,
+            profile_photo_url
+          ),
+          grades (
+            marks,
+            credits,
+            feedback
+          )
+        `)
+        .eq("assignment_id", id)
+        .order("submitted_at", { ascending: false })
 
-        // Fetch Submissions
-        const { data: subsData, error: subsError } = await supabase
-          .from("submissions")
-          .select(`
-            id,
-            status,
-            submitted_at,
-            similarity_score,
-            profiles:student_id (
-              full_name,
-              student_id,
-              department,
-              year,
-              section,
-              profile_photo_url
-            )
-          `)
-          .eq("assignment_id", id)
-          .order("submitted_at", { ascending: false })
+      if (subsError) throw subsError
 
-        if (subsError) throw subsError
+      const formatted = (subsData || []).map((s: any) => {
+        const p = s.profiles || {}
+        const g = (Array.isArray(s.grades) ? s.grades[0] : s.grades) || {}
+        const name = p.full_name || p.email || (p.student_id ? `Student (${p.student_id})` : "Student Profile")
+        return {
+          id: s.id,
+          studentName: name,
+          studentId: p.student_id || "N/A",
+          department: p.department || "Not provided",
+          rawDepartment: p.department,
+          year: p.year ? `${p.year}${p.year === 1 ? 'st' : p.year === 2 ? 'nd' : p.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
+          rawYear: p.year,
+          section: p.section ? `Section ${p.section}` : "Not provided",
+          rawSection: p.section,
+          profilePhoto: p.profile_photo_url || null,
+          status: s.status || "submitted",
+          submittedAt: s.submitted_at,
+          similarityScore: s.similarity_score,
+          marks: g.marks !== undefined && g.marks !== null ? Number(g.marks) : null,
+          credits: g.credits !== undefined && g.credits !== null ? Number(g.credits) : null,
+          feedback: g.feedback || null
+        }
+      })
 
-        const formatted = (subsData || []).map((s: any) => {
-          const p = s.profiles || {}
-          const name = p.full_name || p.email || (p.student_id ? `Student (${p.student_id})` : "Student Profile")
-          return {
-            id: s.id,
-            studentName: name,
-            studentId: p.student_id || "N/A",
-            department: p.department || "Not provided",
-            rawDepartment: p.department,
-            year: p.year ? `${p.year}${p.year === 1 ? 'st' : p.year === 2 ? 'nd' : p.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
-            rawYear: p.year,
-            section: p.section ? `Section ${p.section}` : "Not provided",
-            rawSection: p.section,
-            profilePhoto: p.profile_photo_url || null,
-            status: s.status || "submitted",
-            submittedAt: s.submitted_at,
-            similarityScore: s.similarity_score
-          }
-        })
+      setSubmissions(formatted)
 
-        setSubmissions(formatted)
-
-      } catch (error) {
-        console.error("Error fetching submissions:", error)
-      } finally {
-        setLoading(false)
-      }
+    } catch (error) {
+      console.error("Error fetching submissions:", error)
+    } finally {
+      setLoading(false)
     }
+  }
 
+  useEffect(() => {
     fetchData()
   }, [profile, id])
 
@@ -270,12 +287,36 @@ export default function AssignmentSubmissions() {
                         )}
                       </div>
 
-                      {/* Action */}
-                      <Button asChild className={`rounded-xl font-bold shadow-sm ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
-                        <Link to={`/professor/submissions/${sub.id}/review`}>
-                          {needsReview ? 'Grade Now' : 'View Grade'}
-                        </Link>
-                      </Button>
+                      {/* Actions */}
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedSubForEdit({
+                              id: sub.id,
+                              studentName: sub.studentName,
+                              studentId: sub.studentId,
+                              assignmentId: id || "",
+                              assignmentTitle: assignment?.title || "Assignment",
+                              maxMarks: assignment?.maxMarks || 100,
+                              maxCredits: assignment?.maxCredits || 0,
+                              currentMarks: sub.marks,
+                              currentCredits: sub.credits,
+                              currentFeedback: sub.feedback
+                            })
+                            setEditModalOpen(true)
+                          }}
+                          className="rounded-xl font-bold border-blue-200 text-[#1E5EFF] hover:bg-blue-50 dark:hover:bg-blue-900/40 gap-1.5 text-xs h-10 px-3"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" /> Edit Marks
+                        </Button>
+                        <Button asChild className={`rounded-xl font-bold shadow-sm h-10 ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
+                          <Link to={`/professor/submissions/${sub.id}/review`}>
+                            {needsReview ? 'Grade Now' : 'View Grade'}
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )
@@ -284,6 +325,21 @@ export default function AssignmentSubmissions() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Marks Modal */}
+      {selectedSubForEdit && (
+        <EditMarksModal
+          isOpen={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false)
+            setSelectedSubForEdit(null)
+          }}
+          onSuccess={() => {
+            fetchData()
+          }}
+          submission={selectedSubForEdit}
+        />
+      )}
     </div>
   )
 }

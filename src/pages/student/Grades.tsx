@@ -118,6 +118,20 @@ export default function StudentGrades() {
 
   useEffect(() => {
     fetchGrades()
+
+    if (!profile) return
+
+    // Realtime listener for grade edits
+    const channel = supabase
+      .channel('realtime-grades')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'grades' }, () => {
+        fetchGrades()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [profile])
 
   if (loading) {

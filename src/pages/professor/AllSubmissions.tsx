@@ -4,11 +4,12 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Search, FileText, CheckCircle, Clock, Filter, AlertCircle, RefreshCw } from "lucide-react"
+import { Search, FileText, CheckCircle, Clock, Filter, AlertCircle, RefreshCw, Edit3 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Link, useSearchParams } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
+import EditMarksModal from "@/components/professor/EditMarksModal"
 
 interface AssignmentOption {
   id: string
@@ -29,8 +30,13 @@ interface SubmissionData {
   profilePhoto: string | null
   assignmentTitle: string
   subjectName: string
+  maxMarks: number
+  maxCredits: number
   status: string
   submittedAt: string
+  marks: number | null
+  credits: number | null
+  feedback: string | null
 }
 
 export default function ProfessorAllSubmissions() {
@@ -39,6 +45,9 @@ export default function ProfessorAllSubmissions() {
   const [loading, setLoading] = useState(true)
   const [submissions, setSubmissions] = useState<SubmissionData[]>([])
   const [myAssignments, setMyAssignments] = useState<AssignmentOption[]>([])
+
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [selectedSubForEdit, setSelectedSubForEdit] = useState<any | null>(null)
   
   // Filter states initialized from URL search params if present
   const [searchQuery, setSearchQuery] = useState("")
@@ -65,7 +74,7 @@ export default function ProfessorAllSubmissions() {
       const assignmentIds = (assignmentsData || []).map(a => a.id)
 
       if (assignmentIds.length > 0) {
-        // 2. Fetch all submissions joined with profiles and assignments
+        // 2. Fetch all submissions joined with profiles, assignments, and grades
         const { data: subsData, error: subsErr } = await supabase
           .from("submissions")
           .select(`
@@ -86,8 +95,15 @@ export default function ProfessorAllSubmissions() {
             assignments:assignment_id (
               id,
               title,
+              max_marks,
+              max_credits,
               subject_name,
               subjects (name)
+            ),
+            grades (
+              marks,
+              credits,
+              feedback
             )
           `)
           .in("assignment_id", assignmentIds)
@@ -98,6 +114,7 @@ export default function ProfessorAllSubmissions() {
         const formatted: SubmissionData[] = (subsData || []).map((s: any) => {
           const p = s.profiles || {}
           const a = s.assignments || {}
+          const g = (Array.isArray(s.grades) ? s.grades[0] : s.grades) || {}
           const name = p.full_name || p.email || (p.student_id ? `Student (${p.student_id})` : "Student Profile")
           
           return {
@@ -114,8 +131,13 @@ export default function ProfessorAllSubmissions() {
             profilePhoto: p.profile_photo_url || null,
             assignmentTitle: a.title || "Assignment",
             subjectName: a.subject_name || (a.subjects as any)?.name || "General",
+            maxMarks: a.max_marks || 100,
+            maxCredits: a.max_credits || 0,
             status: s.status || "submitted",
-            submittedAt: s.submitted_at
+            submittedAt: s.submitted_at,
+            marks: g.marks !== undefined && g.marks !== null ? Number(g.marks) : null,
+            credits: g.credits !== undefined && g.credits !== null ? Number(g.credits) : null,
+            feedback: g.feedback || null
           }
         })
 
@@ -123,6 +145,13 @@ export default function ProfessorAllSubmissions() {
       } else {
         setSubmissions([])
       }
+
+    } catch (error) {
+      console.error("Error fetching submissions:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
     } catch (error) {
       console.error("Error fetching submissions:", error)
@@ -391,11 +420,36 @@ export default function ProfessorAllSubmissions() {
                         )}
                       </div>
 
-                      <Button asChild className={`rounded-xl font-bold shadow-sm ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
-                        <Link to={`/professor/submissions/${sub.id}/review`}>
-                          {needsReview ? 'Review' : 'View Grade'}
-                        </Link>
-                      </Button>
+                      {/* Actions */}
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedSubForEdit({
+                              id: sub.id,
+                              studentName: sub.studentName,
+                              studentId: sub.studentId,
+                              assignmentId: sub.assignmentId,
+                              assignmentTitle: sub.assignmentTitle,
+                              maxMarks: sub.maxMarks,
+                              maxCredits: sub.maxCredits,
+                              currentMarks: sub.marks,
+                              currentCredits: sub.credits,
+                              currentFeedback: sub.feedback
+                            })
+                            setEditModalOpen(true)
+                          }}
+                          className="rounded-xl font-bold border-blue-200 text-[#1E5EFF] hover:bg-blue-50 dark:hover:bg-blue-900/40 gap-1.5 text-xs h-10 px-3"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" /> Edit Marks
+                        </Button>
+                        <Button asChild className={`rounded-xl font-bold shadow-sm h-10 ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
+                          <Link to={`/professor/submissions/${sub.id}/review`}>
+                            {needsReview ? 'Review' : 'View Grade'}
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )
@@ -404,6 +458,21 @@ export default function ProfessorAllSubmissions() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Marks Modal */}
+      {selectedSubForEdit && (
+        <EditMarksModal
+          isOpen={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false)
+            setSelectedSubForEdit(null)
+          }}
+          onSuccess={() => {
+            fetchSubmissions()
+          }}
+          submission={selectedSubForEdit}
+        />
+      )}
     </div>
   )
 }
