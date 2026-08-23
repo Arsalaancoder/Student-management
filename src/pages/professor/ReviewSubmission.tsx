@@ -11,6 +11,7 @@ import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
 import { createNotification } from "@/lib/notifications"
+import { triggerGradeNotification } from "@/lib/fcm"
 
 interface ReviewData {
   submissionId: string
@@ -227,6 +228,11 @@ export default function ReviewSubmission() {
           notifTitle = "Grade Published"
           notifMessage = `Your submission for ${data.assignmentTitle} has been graded: ${marksVal}/${data.maxMarks}.`
           notifType = "grade_published"
+
+          // Trigger FCM Push Notification to Student (non-blocking)
+          triggerGradeNotification(data.submissionId).catch(err => {
+            console.warn("FCM grade notification warning:", err)
+          })
         } else if (newStatus === "returned") {
           notifTitle = "Assignment Returned"
           notifMessage = `Your submission for ${data.assignmentTitle} has been returned for corrections.`

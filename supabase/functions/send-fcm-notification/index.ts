@@ -188,6 +188,121 @@ serve(async (req) => {
         return new Response(JSON.stringify({ status: "error", error: resData.error }), { status: 400, headers: corsHeaders })
       }
     }
+    // --- 1. HANDLE ASSIGNMENT GRADED NOTIFICATION TO STUDENT ---
+    if (payload.submission_id && (payload as any).type === "assignment_graded") {
+      const { data: sub, error: subErr } = await supabase
+        .from("submissions")
+        .select("*, assignments(id, title, max_marks, created_by), grades(marks, credits, feedback)")
+        .eq("id", payload.submission_id)
+        .single()
+
+      if (subErr || !sub) {
+        return new Response(JSON.stringify({ error: "Submission not found" }), { status: 404, headers: corsHeaders })
+      }
+
+      const studentId = sub.student_id
+      const assignmentId = sub.assignment_id || sub.assignments?.id
+      const assignmentTitle = sub.assignments?.title || "Assignment"
+      const maxMarks = sub.assignments?.max_marks
+
+      const gradeObj = Array.isArray(sub.grades) ? sub.grades[0] : sub.grades
+      const marks = gradeObj?.marks
+
+      let notificationBody = `Your assignment "${assignmentTitle}" has been graded. Check your marks and feedback in EduTrack.`
+      if (marks !== null && marks !== undefined && maxMarks !== null && maxMarks !== undefined) {
+        notificationBody = `Your assignment "${assignmentTitle}" has been graded. You received ${marks}/${maxMarks}.`
+      }
+
+      // Fetch ALL active FCM tokens for the student (BOTH Web & Android)
+      const { data: studentTokens } = await supabase
+        .from("student_fcm_tokens")
+        .select("fcm_token, platform")
+        .eq("student_id", studentId)
+        .eq("is_active", true)
+
+      if (!studentTokens || studentTokens.length === 0) {
+        return new Response(JSON.stringify({ message: "No active FCM tokens for student.", sent_count: 0 }), { status: 200, headers: corsHeaders })
+      }
+
+      const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
+      let sentCount = 0
+      let webSentCount = 0
+      let androidSentCount = 0
+
+      for (const record of studentTokens) {
+        const fcmPayload = {
+          message: {
+            token: record.fcm_token,
+            notification: {
+              title: "Assignment Graded",
+              body: notificationBody,
+            },
+            data: {
+              type: "assignment_graded",
+              notification_type: "assignment_graded",
+              assignment_id: String(assignmentId),
+              submission_id: String(payload.submission_id),
+              student_id: String(studentId),
+              title: "Assignment Graded",
+              body: notificationBody,
+              url: `/student/assignments/${assignmentId}`,
+            },
+            android: {
+              priority: "HIGH",
+              notification: {
+                sound: "default",
+                channel_id: "edutrack_assignments",
+                default_sound: true,
+                default_vibrate_timings: true,
+                notification_priority: "PRIORITY_HIGH",
+              },
+            },
+            webpush: {
+              headers: { Urgency: "high" },
+              notification: {
+                title: "Assignment Graded",
+                body: notificationBody,
+                icon: "/icon-192.png",
+                badge: "/favicon.svg",
+                tag: `graded-${payload.submission_id}`,
+                renotify: true,
+                data: {
+                  assignment_id: String(assignmentId),
+                  submission_id: String(payload.submission_id),
+                  student_id: String(studentId),
+                  type: "assignment_graded",
+                  notification_type: "assignment_graded",
+                  url: `/student/assignments/${assignmentId}`,
+                },
+              },
+              fcm_options: {
+                link: `https://student-management-swart-one.vercel.app/student/assignments/${assignmentId}`,
+              },
+            },
+          },
+        }
+
+        const res = await fetch(`https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(fcmPayload),
+        })
+
+        if (res.ok) {
+          sentCount++
+          if (record.platform === "web") webSentCount++
+          else if (record.platform === "android") androidSentCount++
+        }
+      }
+
+      return new Response(JSON.stringify({
+        status: "success",
+        sent_count: sentCount,
+        web_sent_count: webSentCount,
+        android_sent_count: androidSentCount,
+      }), { status: 200, headers: corsHeaders })
+    }
+
     if (payload.submission_id) {
       const { data: sub, error: subErr } = await supabase
         .from("submissions")
@@ -381,18 +496,22 @@ serve(async (req) => {
     }
     const deduplicatedTokens = Array.from(uniqueTokenMap.values())
 
-    // 6. Deduplication check via fcm_notifications_log to avoid double-notifying same assignment
-    const { data: existingLogs } = await supabase
-      .from("fcm_notifications_log")
-      .select("fcm_token")
-      .eq("assignment_id", assignment_id)
+    // 6. Deduplication check via fcm_notifications_log to avoid double-notifying same assignment (unless force_resend is true)
+    let eligibleTokens = deduplicatedTokens
+    if (!(payload as any).force_resend) {
+      const { data: existingLogs } = await supabase
+        .from("fcm_notifications_log")
+        .select("fcm_token")
+        .eq("assignment_id", assignment_id)
+        .eq("status", "sent")
 
-    const alreadyNotifiedTokens = new Set(existingLogs?.map((l) => l.fcm_token) || [])
-    const eligibleTokens = deduplicatedTokens.filter((tr) => !alreadyNotifiedTokens.has(tr.fcm_token))
+      const alreadyNotifiedTokens = new Set(existingLogs?.map((l) => l.fcm_token) || [])
+      eligibleTokens = deduplicatedTokens.filter((tr) => !alreadyNotifiedTokens.has(tr.fcm_token))
+    }
 
     if (eligibleTokens.length === 0) {
       return new Response(
-        JSON.stringify({ message: "All eligible student tokens already notified.", sent_count: 0 }),
+        JSON.stringify({ message: "All eligible student tokens already notified.", sent_count: 0, eligible_tokens: 0 }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
@@ -476,12 +595,12 @@ serve(async (req) => {
         if (record.platform === "web") webSentCount++
         else if (record.platform === "android") androidSentCount++
 
-        await supabase.from("fcm_notifications_log").insert({
+        await supabase.from("fcm_notifications_log").upsert({
           assignment_id: assignment_id,
           student_id: record.student_id,
           fcm_token: record.fcm_token,
           status: "sent",
-        })
+        }, { onConflict: "assignment_id,student_id" })
       } else {
         failureCount++
         const errorDetail = fcmData.error?.message || JSON.stringify(fcmData)

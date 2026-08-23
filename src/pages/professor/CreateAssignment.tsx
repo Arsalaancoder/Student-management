@@ -268,7 +268,11 @@ export default function CreateAssignment() {
       try {
         const fcmResult = await triggerFCMNotification(newAssignment.id)
         if (fcmResult && typeof fcmResult.sent_count === "number") {
-          toast.success(`Assignment posted. Push notifications: ${fcmResult.sent_count} sent, ${fcmResult.failed_count || 0} failed.`)
+          if (fcmResult.sent_count > 0) {
+            toast.success(`Assignment posted. Push notifications: ${fcmResult.sent_count} sent, ${fcmResult.failed_count || 0} failed.`)
+          } else {
+            toast.warning(`Assignment posted, but 0 push notifications delivered. (${fcmResult.message || "No active student FCM tokens matched."})`)
+          }
         } else {
           toast.success("Assignment posted successfully.")
         }

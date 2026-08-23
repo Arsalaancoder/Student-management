@@ -18,7 +18,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 
 export async function registerFCMTokenForStudent(userId: string): Promise<string | null> {
   try {
-    if (typeof window === "undefined") return null
+    if (typeof window === "undefined" || !userId) return null
 
     // 1. Check if Android TWA passed a native FCM token via URL parameter or localStorage
     const urlParams = new URLSearchParams(window.location.search)
@@ -29,6 +29,13 @@ export async function registerFCMTokenForStudent(userId: string): Promise<string
 
     const nativeToken = localStorage.getItem("native_fcm_token")
     if (nativeToken && userId) {
+      // Deactivate this token for any other user to prevent cross-account push leaks
+      await supabase
+        .from("student_fcm_tokens" as any)
+        .update({ is_active: false })
+        .eq("fcm_token", nativeToken)
+        .neq("student_id", userId)
+
       await supabase
         .from("student_fcm_tokens" as any)
         .upsert({
@@ -76,6 +83,13 @@ export async function registerFCMTokenForStudent(userId: string): Promise<string
       })
 
       if (webToken && userId && webToken !== nativeToken) {
+        // Deactivate this web token for any other user to prevent cross-account push leaks
+        await supabase
+          .from("student_fcm_tokens" as any)
+          .update({ is_active: false })
+          .eq("fcm_token", webToken)
+          .neq("student_id", userId)
+
         await supabase
           .from("student_fcm_tokens" as any)
           .upsert({
@@ -102,6 +116,36 @@ export async function registerFCMTokenForStudent(userId: string): Promise<string
   } catch (err) {
     console.error("Exception during FCM registration:", err)
     return null
+  }
+}
+
+export async function triggerDirectFCMTest(token: string, title?: string, body?: string): Promise<{
+  success: boolean
+  message: string
+  sent_count?: number
+  error?: any
+}> {
+  try {
+    const { data, error } = await supabase.functions.invoke("send-fcm-notification", {
+      body: {
+        test_token: token,
+        test_title: title || "EduTrack Direct Test",
+        test_body: body || "Direct FCM notification test."
+      }
+    })
+
+    if (error) {
+      return { success: false, message: error.message, sent_count: 0, error }
+    }
+
+    return {
+      success: data?.status === "success" || data?.sent_count > 0,
+      sent_count: data?.sent_count ?? 0,
+      message: data?.message || "Direct FCM test triggered.",
+      error: data?.error
+    }
+  } catch (err: any) {
+    return { success: false, message: err.message || "Failed direct FCM test.", sent_count: 0, error: err }
   }
 }
 
@@ -139,6 +183,7 @@ export async function triggerSubmissionNotification(submissionId: string): Promi
   success: boolean
   message: string
   sent_count?: number
+  failed_count?: number
 }> {
   try {
     const { data, error } = await supabase.functions.invoke("send-fcm-notification", {
@@ -147,16 +192,47 @@ export async function triggerSubmissionNotification(submissionId: string): Promi
 
     if (error) {
       console.warn("Edge function invocation warning for submission:", error)
-      return { success: false, message: error.message, sent_count: 0 }
+      return { success: false, message: error.message, sent_count: 0, failed_count: 0 }
     }
 
     return {
       success: true,
       sent_count: data?.sent_count ?? 0,
+      failed_count: data?.failed_count ?? 0,
       message: data?.message || "Submission notification sent."
     }
   } catch (err: any) {
     console.warn("Exception invoking send-fcm-notification for submission:", err)
-    return { success: false, message: err.message || "Failed to trigger submission notification.", sent_count: 0 }
+    return { success: false, message: err.message || "Failed to trigger submission notification.", sent_count: 0, failed_count: 0 }
   }
 }
+
+export async function triggerGradeNotification(submissionId: string): Promise<{
+  success: boolean
+  message: string
+  sent_count?: number
+  failed_count?: number
+}> {
+  try {
+    const { data, error } = await supabase.functions.invoke("send-fcm-notification", {
+      body: { submission_id: submissionId, type: "assignment_graded" }
+    })
+
+    if (error) {
+      console.warn("Edge function invocation warning for grade notification:", error)
+      return { success: false, message: error.message, sent_count: 0, failed_count: 0 }
+    }
+
+    return {
+      success: true,
+      sent_count: data?.sent_count ?? 0,
+      failed_count: data?.failed_count ?? 0,
+      message: data?.message || "Grade notification sent."
+    }
+  } catch (err: any) {
+    console.warn("Exception invoking send-fcm-notification for grade notification:", err)
+    return { success: false, message: err.message || "Failed to trigger grade notification.", sent_count: 0, failed_count: 0 }
+  }
+}
+
+
