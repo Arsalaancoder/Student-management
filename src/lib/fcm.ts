@@ -45,7 +45,7 @@ export async function registerFCMTokenForStudent(userId: string): Promise<string
         })
     }
 
-    // 2. Register Web FCM Token as 'web' platform
+    // 2. Register Web FCM Token as 'web' platform for Chrome / Edge / Safari / PWA
     if (!("Notification" in window)) {
       return nativeToken || null
     }
@@ -81,7 +81,7 @@ export async function registerFCMTokenForStudent(userId: string): Promise<string
           .upsert({
             student_id: userId,
             fcm_token: webToken,
-            platform: "web", // DISTINCT WEB CHROME BROWSER TOKEN
+            platform: "web", // DISTINCT WEB CHROME / BROWSER TOKEN
             is_active: true,
             last_seen_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -132,5 +132,31 @@ export async function triggerFCMNotification(assignmentId: string): Promise<{
   } catch (err: any) {
     console.warn("Exception invoking send-fcm-notification function:", err)
     return { success: false, message: err.message || "Failed to trigger FCM.", sent_count: 0, failed_count: 0 }
+  }
+}
+
+export async function triggerSubmissionNotification(submissionId: string): Promise<{
+  success: boolean
+  message: string
+  sent_count?: number
+}> {
+  try {
+    const { data, error } = await supabase.functions.invoke("send-fcm-notification", {
+      body: { submission_id: submissionId }
+    })
+
+    if (error) {
+      console.warn("Edge function invocation warning for submission:", error)
+      return { success: false, message: error.message, sent_count: 0 }
+    }
+
+    return {
+      success: true,
+      sent_count: data?.sent_count ?? 0,
+      message: data?.message || "Submission notification sent."
+    }
+  } catch (err: any) {
+    console.warn("Exception invoking send-fcm-notification for submission:", err)
+    return { success: false, message: err.message || "Failed to trigger submission notification.", sent_count: 0 }
   }
 }

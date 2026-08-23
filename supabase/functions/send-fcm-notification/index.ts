@@ -142,7 +142,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     const payload: RequestPayload = await req.json()
 
-    // --- HANDLE STUDENT SUBMISSION NOTIFICATION TO PROFESSOR ---
+    // --- 1. HANDLE STUDENT SUBMISSION NOTIFICATION TO PROFESSOR (BOTH WEB & ANDROID) ---
     if (payload.submission_id) {
       const { data: sub, error: subErr } = await supabase
         .from("submissions")
@@ -158,7 +158,7 @@ serve(async (req) => {
       const studentName = sub.profiles?.full_name || "A student"
       const assignmentTitle = sub.assignments?.title || "Assignment"
 
-      // Fetch professor's active tokens (prefer Android APK token)
+      // Fetch ALL active FCM tokens for professor (BOTH Web & Android)
       const { data: profTokens } = await supabase
         .from("student_fcm_tokens")
         .select("fcm_token, platform")
@@ -171,6 +171,8 @@ serve(async (req) => {
 
       const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
       let sentCount = 0
+      let webSentCount = 0
+      let androidSentCount = 0
 
       for (const record of profTokens) {
         const fcmPayload = {
@@ -196,6 +198,18 @@ serve(async (req) => {
                 notification_priority: "PRIORITY_HIGH",
               },
             },
+            webpush: {
+              headers: { Urgency: "high" },
+              notification: {
+                title: "Assignment Submitted",
+                body: `${studentName} submitted "${assignmentTitle}"`,
+                icon: "/icon-192.png",
+                badge: "/favicon.svg",
+              },
+              fcm_options: {
+                link: `https://student-management-swart-one.vercel.app/professor/submissions`,
+              },
+            },
           },
         }
 
@@ -205,13 +219,22 @@ serve(async (req) => {
           body: JSON.stringify(fcmPayload),
         })
 
-        if (res.ok) sentCount++
+        if (res.ok) {
+          sentCount++
+          if (record.platform === "web") webSentCount++
+          else if (record.platform === "android") androidSentCount++
+        }
       }
 
-      return new Response(JSON.stringify({ status: "success", sent_count: sentCount }), { status: 200, headers: corsHeaders })
+      return new Response(JSON.stringify({
+        status: "success",
+        sent_count: sentCount,
+        web_sent_count: webSentCount,
+        android_sent_count: androidSentCount,
+      }), { status: 200, headers: corsHeaders })
     }
 
-    // --- HANDLE NEW ASSIGNMENT NOTIFICATION TO STUDENTS ---
+    // --- 2. HANDLE NEW ASSIGNMENT NOTIFICATION TO STUDENTS (BOTH WEB & ANDROID) ---
     const { assignment_id } = payload
 
     if (!assignment_id) {
@@ -261,7 +284,7 @@ serve(async (req) => {
       )
     }
 
-    // Filter target students using smart branch matching
+    // Filter target students using dynamic branch + year + section matching
     const targetStudents = allStudents.filter(student => {
       if (assignment.target_branch && !checkBranchMatch(assignment.target_branch, student.department)) {
         return false
@@ -286,7 +309,7 @@ serve(async (req) => {
 
     const studentIds = targetStudents.map((s) => s.id)
 
-    // 4. Fetch active FCM tokens for target students
+    // 4. Fetch ALL active FCM tokens for target students (BOTH Web & Android platforms)
     const { data: tokenRecords, error: tokenErr } = await supabase
       .from("student_fcm_tokens")
       .select("student_id, fcm_token, platform")
@@ -304,29 +327,40 @@ serve(async (req) => {
       )
     }
 
-    // 5. Deduplication check via fcm_notifications_log
+    // 5. Deduplicate tokens by fcm_token
+    const uniqueTokenMap = new Map<string, { student_id: string; fcm_token: string; platform: string }>()
+    for (const tr of tokenRecords) {
+      if (!uniqueTokenMap.has(tr.fcm_token)) {
+        uniqueTokenMap.set(tr.fcm_token, tr)
+      }
+    }
+    const deduplicatedTokens = Array.from(uniqueTokenMap.values())
+
+    // 6. Deduplication check via fcm_notifications_log to avoid double-notifying same assignment
     const { data: existingLogs } = await supabase
       .from("fcm_notifications_log")
-      .select("student_id")
+      .select("fcm_token")
       .eq("assignment_id", assignment_id)
 
-    const alreadyNotifiedStudentIds = new Set(existingLogs?.map((l) => l.student_id) || [])
-    const eligibleTokens = tokenRecords.filter((tr) => !alreadyNotifiedStudentIds.has(tr.student_id))
+    const alreadyNotifiedTokens = new Set(existingLogs?.map((l) => l.fcm_token) || [])
+    const eligibleTokens = deduplicatedTokens.filter((tr) => !alreadyNotifiedTokens.has(tr.fcm_token))
 
     if (eligibleTokens.length === 0) {
       return new Response(
-        JSON.stringify({ message: "All eligible students already notified.", sent_count: 0 }),
+        JSON.stringify({ message: "All eligible student tokens already notified.", sent_count: 0 }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
 
-    // 6. Obtain Google OAuth2 access token
+    // 7. Obtain Google OAuth2 access token
     const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
 
     let sentCount = 0
     let failureCount = 0
+    let webSentCount = 0
+    let androidSentCount = 0
 
-    // 7. Dispatch FCM notification for each token
+    // 8. Dispatch FCM notification for each token (Dual Channel: Web + Android)
     for (const record of eligibleTokens) {
       const fcmPayload = {
         message: {
@@ -394,6 +428,9 @@ serve(async (req) => {
 
       if (fcmResp.ok) {
         sentCount++
+        if (record.platform === "web") webSentCount++
+        else if (record.platform === "android") androidSentCount++
+
         await supabase.from("fcm_notifications_log").insert({
           assignment_id: assignment_id,
           student_id: record.student_id,
@@ -403,7 +440,7 @@ serve(async (req) => {
       } else {
         failureCount++
         const errorDetail = fcmData.error?.message || JSON.stringify(fcmData)
-        console.error(`FCM send failed for token ${record.fcm_token.slice(0, 10)}...: ${errorDetail}`)
+        console.error(`FCM send failed for ${record.platform} token ${record.fcm_token.slice(0, 10)}...: ${errorDetail}`)
 
         if (
           errorDetail.includes("UNREGISTERED") ||
@@ -423,6 +460,8 @@ serve(async (req) => {
         status: "success",
         sent_count: sentCount,
         failed_count: failureCount,
+        web_sent_count: webSentCount,
+        android_sent_count: androidSentCount,
         eligible_tokens: eligibleTokens.length,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
