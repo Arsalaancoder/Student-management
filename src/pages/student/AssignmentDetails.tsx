@@ -15,6 +15,7 @@ import { createNotification } from "@/lib/notifications"
 import { isAssignmentTargetedToStudent } from "@/lib/targeting"
 import { triggerSimilarityCheck } from "@/lib/plagiarismApi"
 import { PLAGIARISM_CONFIG } from "@/lib/plagiarismConfig"
+import { triggerSubmissionNotification } from "@/lib/fcm"
 
 export default function AssignmentDetails() {
   const { id } = useParams()
@@ -336,6 +337,11 @@ export default function AssignmentDetails() {
       setVersions([newVersion, ...versions])
       setSelectedFile(null)
       toast.success("Assignment submitted successfully!")
+
+      // Trigger FCM Push Notification to Professor (non-blocking)
+      triggerSubmissionNotification(currentSubmissionId).catch(err => {
+        console.warn("FCM submission push notification warning:", err)
+      })
 
       // Trigger similarity check in background (non-blocking)
       triggerSimilarityCheck(currentSubmissionId)

@@ -71,15 +71,18 @@ public class EduTrackFirebaseMessagingService extends FirebaseMessagingService {
             }
         }
 
-        sendSystemNotification(title, body, assignmentId);
+        sendSystemNotification(title, body, assignmentId, data);
     }
 
-    private void sendSystemNotification(String title, String body, String assignmentId) {
+    private void sendSystemNotification(String title, String body, String assignmentId, Map<String, String> data) {
         createNotificationChannel(this);
 
         // Target URL for deep linking into TWA
         String targetUrl = "https://student-management-swart-one.vercel.app";
-        if (assignmentId != null && !assignmentId.isEmpty()) {
+        if (data != null && data.containsKey("url") && data.get("url") != null && !data.get("url").isEmpty()) {
+            String urlPath = data.get("url");
+            targetUrl += urlPath.startsWith("/") ? urlPath : "/" + urlPath;
+        } else if (assignmentId != null && !assignmentId.isEmpty()) {
             targetUrl += "/student/assignments/" + assignmentId;
         } else {
             targetUrl += "/student/assignments";

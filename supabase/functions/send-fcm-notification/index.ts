@@ -142,7 +142,52 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
     const payload: RequestPayload = await req.json()
 
-    // --- 1. HANDLE STUDENT SUBMISSION NOTIFICATION TO PROFESSOR (BOTH WEB & ANDROID) ---
+    // --- 0. HANDLE DIRECT FCM TEST NOTIFICATION ---
+    if ((payload as any).test_token) {
+      const testToken = (payload as any).test_token
+      const testTitle = (payload as any).test_title || "EduTrack Direct Test"
+      const testBody = (payload as any).test_body || "Native FCM direct push test"
+
+      const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
+      const fcmPayload = {
+        message: {
+          token: testToken,
+          notification: {
+            title: testTitle,
+            body: testBody,
+          },
+          data: {
+            notification_type: "test",
+            title: testTitle,
+            body: testBody,
+            url: "/student/assignments",
+          },
+          android: {
+            priority: "HIGH",
+            notification: {
+              sound: "default",
+              channel_id: "edutrack_assignments",
+              default_sound: true,
+              default_vibrate_timings: true,
+              notification_priority: "PRIORITY_HIGH",
+            },
+          },
+        },
+      }
+
+      const res = await fetch(`https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(fcmPayload),
+      })
+
+      const resData = await res.json()
+      if (res.ok) {
+        return new Response(JSON.stringify({ status: "success", sent_count: 1, message_id: resData.name }), { status: 200, headers: corsHeaders })
+      } else {
+        return new Response(JSON.stringify({ status: "error", error: resData.error }), { status: 400, headers: corsHeaders })
+      }
+    }
     if (payload.submission_id) {
       const { data: sub, error: subErr } = await supabase
         .from("submissions")
