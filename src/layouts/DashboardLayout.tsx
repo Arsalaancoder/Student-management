@@ -47,10 +47,10 @@ export default function DashboardLayout({ type = "student" }: { type?: "student"
   const { profile, signOut } = useAuth()
 
   useEffect(() => {
-    if (type === "student" && profile?.id) {
+    if (profile?.id) {
       registerFCMTokenForStudent(profile.id)
     }
-  }, [type, profile?.id])
+  }, [profile?.id])
 
   const studentLinks: SidebarItem[] = [
     { icon: LayoutDashboard, label: "Dashboard", href: "/student/dashboard" },

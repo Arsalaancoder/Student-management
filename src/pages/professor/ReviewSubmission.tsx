@@ -315,7 +315,7 @@ export default function ReviewSubmission() {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-7xl mx-auto h-[calc(100vh-100px)] flex flex-col">
+    <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-7xl mx-auto min-h-screen lg:h-[calc(100vh-100px)] flex flex-col">
       
       {/* Header */}
       <div className="flex items-center gap-4 shrink-0">
@@ -603,19 +603,19 @@ export default function ReviewSubmission() {
 
                 </CardContent>
                 {!isGraded && (
-                  <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4 shrink-0">
+                  <div className="p-4 sm:p-6 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-3 sm:gap-4 shrink-0">
                     <Button 
                       onClick={() => submitAction('graded', true)}
                       disabled={saving || !gradeForm.marks}
                       variant="outline"
-                      className="w-1/3 rounded-2xl h-14 font-bold bg-white text-[#0B1E43] shadow-sm text-lg"
+                      className="w-full sm:w-1/3 rounded-2xl h-12 sm:h-14 font-bold bg-white text-[#0B1E43] shadow-sm text-base sm:text-lg"
                     >
                       {saving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Save Draft"}
                     </Button>
                     <Button 
                       onClick={() => submitAction('graded', false)}
                       disabled={saving || !gradeForm.marks}
-                      className="w-2/3 rounded-2xl h-14 font-bold bg-[#1E5EFF] hover:bg-blue-700 shadow-md text-lg"
+                      className="w-full sm:w-2/3 rounded-2xl h-12 sm:h-14 font-bold bg-[#1E5EFF] hover:bg-blue-700 shadow-md text-base sm:text-lg"
                     >
                       {saving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <><CheckCircle className="mr-2 h-5 w-5" /> Approve & Publish</>}
                     </Button>

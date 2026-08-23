@@ -16,82 +16,102 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]
 
-export async function registerFCMTokenForStudent(studentId: string): Promise<string | null> {
+export async function registerFCMTokenForStudent(userId: string): Promise<string | null> {
   try {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      console.warn("FCM: Notifications not supported on this browser environment.")
-      return null
+    if (typeof window === "undefined") return null
+
+    // 1. Check if Android TWA passed a native FCM token via URL parameter or localStorage
+    const urlParams = new URLSearchParams(window.location.search)
+    const nativeTokenFromUrl = urlParams.get("native_fcm_token")
+    if (nativeTokenFromUrl) {
+      localStorage.setItem("native_fcm_token", nativeTokenFromUrl)
     }
 
-    if (Notification.permission === "denied") {
-      console.log("FCM: Notification permission denied by user.")
-      return null
+    const nativeToken = localStorage.getItem("native_fcm_token")
+    if (nativeToken && userId) {
+      await supabase
+        .from("student_fcm_tokens" as any)
+        .upsert({
+          student_id: userId,
+          fcm_token: nativeToken,
+          platform: "android", // NATIVE ANDROID APK TOKEN
+          is_active: true,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: "student_id,fcm_token" })
+        .then(({ error }) => {
+          if (!error) console.log("[FCM Native] Registered native Android token for user:", userId)
+          else console.warn("[FCM Native] Token store warning:", error)
+        })
     }
 
-    const permission = await Notification.requestPermission()
-    if (permission !== "granted") {
-      console.log("FCM: Notification permission not granted.")
-      return null
+    // 2. Register Web FCM Token as 'web' platform
+    if (!("Notification" in window)) {
+      return nativeToken || null
     }
 
-    let messaging: any = null
-    try {
-      messaging = getMessaging(app)
-    } catch (msgErr) {
-      console.warn("FCM getMessaging warning:", msgErr)
-      return null
-    }
+    if (Notification.permission === "granted" || (await Notification.requestPermission()) === "granted") {
+      let messaging: any = null
+      try {
+        messaging = getMessaging(app)
+      } catch (msgErr) {
+        console.warn("FCM getMessaging warning:", msgErr)
+        return nativeToken || null
+      }
 
-    // Retrieve FCM Token using Firebase Messaging
-    const token = await getToken(messaging, {
-      serviceWorkerRegistration: navigator.serviceWorker ? await navigator.serviceWorker.ready : undefined
-    }).catch(err => {
-      console.warn("FCM getToken warning:", err)
-      return null
-    })
+      let swRegistration: ServiceWorkerRegistration | undefined = undefined
+      if ("serviceWorker" in navigator) {
+        try {
+          swRegistration = await navigator.serviceWorker.register("/firebase-messaging-sw.js")
+        } catch (swErr) {
+          swRegistration = await navigator.serviceWorker.ready.catch(() => undefined)
+        }
+      }
 
-    if (!token) {
-      console.log("FCM: Could not obtain token from Firebase Web SDK.")
-      return null
-    }
-
-    // Save token securely to Supabase student_fcm_tokens table (Phase 5 & 6)
-    const { error } = await supabase
-      .from("student_fcm_tokens" as any)
-      .upsert({
-        student_id: studentId,
-        fcm_token: token,
-        platform: "android",
-        is_active: true,
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }, { onConflict: "student_id,fcm_token" })
-
-    if (error) {
-      console.error("Error saving FCM token to database:", error)
-    } else {
-      console.log("[FCM] Registered token for student:", studentId)
-    }
-
-    // Handle Foreground FCM Notifications (Phase 14)
-    onMessage(messaging, (payload: any) => {
-      console.log("[FCM Foreground Message]:", payload)
-      const title = payload.notification?.title || payload.data?.title || "New Assignment"
-      const body = payload.notification?.body || payload.data?.body || "New update received"
-
-      toast(title, {
-        description: body,
+      const webToken = await getToken(messaging, {
+        serviceWorkerRegistration: swRegistration
+      }).catch(err => {
+        console.warn("FCM getToken warning:", err)
+        return null
       })
-    })
 
-    return token
+      if (webToken && userId && webToken !== nativeToken) {
+        await supabase
+          .from("student_fcm_tokens" as any)
+          .upsert({
+            student_id: userId,
+            fcm_token: webToken,
+            platform: "web", // DISTINCT WEB CHROME BROWSER TOKEN
+            is_active: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, { onConflict: "student_id,fcm_token" })
+
+        onMessage(messaging, (payload: any) => {
+          const title = payload.notification?.title || payload.data?.title || "New Notification"
+          const body = payload.notification?.body || payload.data?.body || "New update received"
+
+          toast(title, { description: body })
+        })
+
+        return webToken
+      }
+    }
+
+    return nativeToken || null
   } catch (err) {
     console.error("Exception during FCM registration:", err)
     return null
   }
 }
 
-export async function triggerFCMNotification(assignmentId: string): Promise<{ success: boolean; message: string }> {
+export async function triggerFCMNotification(assignmentId: string): Promise<{
+  success: boolean
+  message: string
+  sent_count?: number
+  failed_count?: number
+  eligible_tokens?: number
+}> {
   try {
     const { data, error } = await supabase.functions.invoke("send-fcm-notification", {
       body: { assignment_id: assignmentId }
@@ -99,12 +119,18 @@ export async function triggerFCMNotification(assignmentId: string): Promise<{ su
 
     if (error) {
       console.warn("Edge function invocation warning:", error)
-      return { success: false, message: error.message }
+      return { success: false, message: error.message, sent_count: 0, failed_count: 0 }
     }
 
-    return { success: true, message: data?.message || "FCM notification triggered successfully." }
+    return {
+      success: true,
+      sent_count: data?.sent_count ?? 0,
+      failed_count: data?.failed_count ?? 0,
+      eligible_tokens: data?.eligible_tokens ?? 0,
+      message: data?.message || "Push notifications processed successfully."
+    }
   } catch (err: any) {
     console.warn("Exception invoking send-fcm-notification function:", err)
-    return { success: false, message: err.message || "Failed to trigger FCM." }
+    return { success: false, message: err.message || "Failed to trigger FCM.", sent_count: 0, failed_count: 0 }
   }
 }

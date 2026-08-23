@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
-import { normalizeBranch } from "@/lib/targeting"
+import { normalizeBranch, isAssignmentTargetedToStudent } from "@/lib/targeting"
 import { useDebounce } from "@/hooks/useDebounce"
 
 const STANDARD_BRANCHES = [
@@ -97,7 +97,7 @@ export default function StudentProgress() {
       // 2. Fetch Assignments created by professor (or all active assignments)
       const { data: assignmentsData, error: assignErr } = await supabase
         .from("assignments")
-        .select("id, title, subject_name, target_branch, target_year, all_sections, max_marks, max_credits, created_at, created_by")
+        .select("id, title, subject_name, target_branch, target_year, all_sections, max_marks, max_credits, created_at, created_by, assignment_sections(section)")
         .order("created_at", { ascending: false })
 
       if (assignErr) throw assignErr
@@ -204,6 +204,11 @@ export default function StudentProgress() {
       }
 
       activeAssignments.forEach(assign => {
+        // Skip assignment if not targeted to this student's profile
+        if (assign.id !== "none" && !isAssignmentTargetedToStudent(assign, student)) {
+          return
+        }
+
         const subKey = `${student.id}_${assign.id}`
         const submission = subByStudentAssign.get(subKey)
         const grade = submission ? gradesMap.get(submission.id) : null
@@ -298,24 +303,31 @@ export default function StudentProgress() {
     return STANDARD_BRANCHES.map(branch => {
       const branchNorm = branch.id
       const branchStudents = students.filter(s => normalizeBranch(s.department) === branchNorm)
-      const studentIds = new Set(branchStudents.map(s => s.id))
 
       let completedCount = 0
-      let notCompletedCount = 0
+      let totalPossible = 0
       let totalCredits = 0
 
+      const subByStudentAssign = new Map<string, any>()
       submissions.forEach(sub => {
-        if (studentIds.has(sub.student_id) && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
-          completedCount++
-        }
+        subByStudentAssign.set(`${sub.student_id}_${sub.assignment_id}`, sub)
       })
 
       branchStudents.forEach(s => {
         totalCredits += creditsMap.get(s.id) || 0
+
+        assignments.forEach(assign => {
+          if (isAssignmentTargetedToStudent(assign, s)) {
+            totalPossible++
+            const sub = subByStudentAssign.get(`${s.id}_${assign.id}`)
+            if (sub && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
+              completedCount++
+            }
+          }
+        })
       })
 
-      const totalPossible = branchStudents.length * (assignments.length || 1)
-      notCompletedCount = Math.max(0, totalPossible - completedCount)
+      const notCompletedCount = Math.max(0, totalPossible - completedCount)
 
       return {
         id: branch.id,
@@ -339,21 +351,29 @@ export default function StudentProgress() {
         return matchSec && matchBranch
       })
 
-      const studentIds = new Set(sectionStudents.map(s => s.id))
       let completed = 0
+      let totalPossible = 0
       let totalCredits = 0
 
+      const subByStudentAssign = new Map<string, any>()
       submissions.forEach(sub => {
-        if (studentIds.has(sub.student_id) && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
-          completed++
-        }
+        subByStudentAssign.set(`${sub.student_id}_${sub.assignment_id}`, sub)
       })
 
       sectionStudents.forEach(s => {
         totalCredits += creditsMap.get(s.id) || 0
+
+        assignments.forEach(assign => {
+          if (isAssignmentTargetedToStudent(assign, s)) {
+            totalPossible++
+            const sub = subByStudentAssign.get(`${s.id}_${assign.id}`)
+            if (sub && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
+              completed++
+            }
+          }
+        })
       })
 
-      const totalPossible = sectionStudents.length * (assignments.length || 1)
       const notCompleted = Math.max(0, totalPossible - completed)
 
       return {

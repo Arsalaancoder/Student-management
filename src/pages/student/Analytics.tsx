@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Loader2, TrendingUp, TrendingDown, BookOpen, Clock, FileText, CheckCircle, AlertTriangle, Lightbulb } from "lucide-react"
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 
+import { isAssignmentTargetedToStudent } from "@/lib/targeting"
+
 export default function StudentAnalytics() {
   const { profile } = useAuth()
   const [loading, setLoading] = useState(true)
@@ -64,7 +66,7 @@ export default function StudentAnalytics() {
         }
 
         const assignments = (rawAssignments || []).filter(a =>
-          submittedAssignIds.has(a.id) || isAssignmentTargetedToStudent(a, profile)
+          isAssignmentTargetedToStudent(a, profile)
         )
         const totalAssignmentsCount = assignments.length
 

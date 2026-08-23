@@ -5,14 +5,13 @@ import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { 
-  Loader2, ArrowLeft, Save, AlertCircle, Plus, Trash2, CheckCircle2, 
-  Upload, FileText, X 
+import {
+  Loader2, ArrowLeft, Save, AlertCircle, Plus, Trash2, CheckCircle2,
+  Upload, FileText, X
 } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { createNotificationForTargetGroup } from "@/lib/notifications"
-import { triggerAssignmentEmailNotification } from "@/lib/emailNotifications"
 import { triggerFCMNotification } from "@/lib/fcm"
 
 interface FormErrors {
@@ -265,32 +264,17 @@ export default function CreateAssignment() {
         newAssignment.id
       )
 
-      // Automatically send email notifications to eligible registered students
+      // Automatically trigger FCM Push Notifications (Fail-safe, non-blocking)
       try {
-        toast.info("Assignment created. Email notifications: Sending...")
-        const emailResult = await triggerAssignmentEmailNotification(newAssignment.id)
-        
-        if (emailResult.sent_count > 0 && emailResult.failed_count > 0) {
-          toast.success(`Email notifications: ${emailResult.sent_count} sent, ${emailResult.failed_count} failed`)
-        } else if (emailResult.sent_count > 0) {
-          toast.success(`Email notifications: ${emailResult.sent_count} sent`)
-        } else if (emailResult.failed_count > 0) {
-          toast.warning(`Email notifications: 0 sent, ${emailResult.failed_count} failed (${emailResult.message})`)
-        } else if (emailResult.total_eligible === 0) {
-          toast.info("Assignment posted. No eligible students found for selected targeting criteria.")
+        const fcmResult = await triggerFCMNotification(newAssignment.id)
+        if (fcmResult && typeof fcmResult.sent_count === "number") {
+          toast.success(`Assignment posted. Push notifications: ${fcmResult.sent_count} sent, ${fcmResult.failed_count || 0} failed.`)
         } else {
           toast.success("Assignment posted successfully.")
         }
-      } catch (emailErr) {
-        console.warn("Email notification processing error:", emailErr)
-        toast.success("Assignment posted successfully.")
-      }
-
-      // Automatically trigger FCM Push Notifications (Phase 9 & 27: Fail-safe, non-blocking)
-      try {
-        await triggerFCMNotification(newAssignment.id)
       } catch (fcmErr) {
         console.warn("FCM push notification dispatch warning:", fcmErr)
+        toast.success("Assignment posted successfully.")
       }
 
       navigate("/professor/assignments")
@@ -306,7 +290,7 @@ export default function CreateAssignment() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-4xl mx-auto">
-      
+
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild className="rounded-full hover:bg-muted">
           <Link to="/professor/assignments"><ArrowLeft className="h-5 w-5" /></Link>
@@ -479,7 +463,7 @@ export default function CreateAssignment() {
               <div className="space-y-3 md:col-span-2">
                 <label className="text-sm font-bold text-[#0B1E43]">Assignment File</label>
                 <p className="text-xs text-muted-foreground">Upload a PDF, DOC, or DOCX file (max 50MB).</p>
-                
+
                 {selectedFile ? (
                   <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-2xl">
                     <div className="flex items-center gap-3">
@@ -551,7 +535,7 @@ export default function CreateAssignment() {
                     <h3 className="text-base font-bold text-[#0B1E43] uppercase tracking-wider">ASSIGNMENT DISTRIBUTION</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">Specify the target Branch, Year, and Section distribution for this assignment.</p>
                   </div>
-                  
+
                   <div className="grid gap-6 md:grid-cols-2">
                     {/* Branch */}
                     <div className="space-y-2">

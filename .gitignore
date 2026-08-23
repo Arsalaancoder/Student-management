@@ -27,7 +27,10 @@ dist-ssr
 android/gradle-8.7-bin.zip
 android/gradle-bin/
 android/app/build/
+android/build/
 android/.gradle/
+android/local.properties
+android/debug.keystore
 
 # Firebase & Secret Files
 *google-services*.json

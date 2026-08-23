@@ -13,7 +13,7 @@ interface RequestPayload {
 function normalizeDepartment(deptStr: string): string[] {
   if (!deptStr) return []
   const clean = deptStr.toLowerCase().trim()
-  
+
   if (clean.includes('computer science') || clean.includes('cse')) {
     return ['cse', 'computer science', 'computer science & engineering']
   }
@@ -49,9 +49,9 @@ function checkBranchMatch(targetBranch: string | null | undefined, studentDept: 
   const studentTokens = normalizeDepartment(studentDept)
 
   return targetTokens.some(t => studentTokens.includes(t)) ||
-         targetBranch.toLowerCase().trim() === studentDept.toLowerCase().trim() ||
-         targetBranch.toLowerCase().includes(studentDept.toLowerCase().trim()) ||
-         studentDept.toLowerCase().includes(targetBranch.toLowerCase().trim())
+    targetBranch.toLowerCase().trim() === studentDept.toLowerCase().trim() ||
+    targetBranch.toLowerCase().includes(studentDept.toLowerCase().trim()) ||
+    studentDept.toLowerCase().includes(targetBranch.toLowerCase().trim())
 }
 
 serve(async (req) => {

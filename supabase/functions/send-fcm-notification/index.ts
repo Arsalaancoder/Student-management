@@ -7,7 +7,52 @@ const corsHeaders = {
 }
 
 interface RequestPayload {
-  assignment_id: string
+  assignment_id?: string
+  submission_id?: string
+}
+
+function normalizeDepartment(deptStr: string): string[] {
+  if (!deptStr) return []
+  const clean = deptStr.toLowerCase().trim()
+
+  if (clean.includes("computer science") || clean.includes("cse")) {
+    return ["cse", "computer science", "computer science & engineering"]
+  }
+  if (clean.includes("data science") || clean.includes("ai & ds") || clean.includes("aids") || clean.includes("ai & data science") || clean.includes("ds")) {
+    return ["aids", "ai & ds", "data science", "ds", "artificial intelligence & data science"]
+  }
+  if (clean.includes("machine learning") || clean.includes("ai & ml") || clean.includes("aiml") || clean.includes("ai & machine learning")) {
+    return ["aiml", "ai & ml", "ai & machine learning", "artificial intelligence & machine learning"]
+  }
+  if (clean.includes("information technology") || clean === "it") {
+    return ["it", "information technology"]
+  }
+  if (clean.includes("electronics & communication") || clean === "ece") {
+    return ["ece", "electronics & communication"]
+  }
+  if (clean.includes("electrical") || clean === "eee") {
+    return ["eee", "electrical & electronics"]
+  }
+  if (clean.includes("mechanical") || clean === "mech") {
+    return ["mech", "mechanical engineering"]
+  }
+  if (clean.includes("civil")) {
+    return ["civil", "civil engineering"]
+  }
+  return [clean]
+}
+
+function checkBranchMatch(targetBranch: string | null | undefined, studentDept: string | null | undefined): boolean {
+  if (!targetBranch || !targetBranch.trim()) return true
+  if (!studentDept || !studentDept.trim()) return false
+
+  const targetTokens = normalizeDepartment(targetBranch)
+  const studentTokens = normalizeDepartment(studentDept)
+
+  return targetTokens.some(t => studentTokens.includes(t)) ||
+    targetBranch.toLowerCase().trim() === studentDept.toLowerCase().trim() ||
+    targetBranch.toLowerCase().includes(studentDept.toLowerCase().trim()) ||
+    studentDept.toLowerCase().includes(targetBranch.toLowerCase().trim())
 }
 
 // Generate Google OAuth2 Token for FCM HTTP v1 API using RS256 Service Account JWT
@@ -91,15 +136,86 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || ""
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID") || "edutrack-c69ba"
-    const firebaseClientEmail = Deno.env.get("FIREBASE_CLIENT_EMAIL") || ""
-    const firebasePrivateKey = Deno.env.get("FIREBASE_PRIVATE_KEY") || ""
+    const firebaseClientEmail = Deno.env.get("FIREBASE_CLIENT_EMAIL") || "firebase-adminsdk-fbsvc@edutrack-c69ba.iam.gserviceaccount.com"
+    const firebasePrivateKey = Deno.env.get("FIREBASE_PRIVATE_KEY") || `-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQClLFD/6xe40F6j\nNSiTUSRyxth0MY/BeCF54mc6V5ep4x617WN4iMyCGQ5SALBQFq2TBe9JxLre43I3\nZDOCoIWWfrsf4SoNfeU3+YRsPjQyK55b/89MB6l2Hhlio1/WxSejW0jDJfqXxuJh\nlNVac2XMqZuLnLK+zWyFktmbqvZivDwscPNvuW93Ey3mwVWQz/0GEtQJvkZgva5i\n26ckqctw//jhN/AoLNlvgCoKMQTHkyGAZmxvOaKZ9wM0BfnUgM0kmCcF4WSMgSOR\nzRB1pigkMfZiZtHxpF91ZDv23oPTmUrCqLaNyczZiLax0k7X2mskjop0w/+0mh7e\nyGonQJrPAgMBAAECggEAHQyMOlYYV/KdkkqZFj+hD2aVTuoghEAicxM0YHhjPgep\nsQlNAzfb782ETTu9xngWktLqYKjuzKBnyAIhZQniNLOZKWQqRzErDQsfFQJjn6c4\nNKnqxU5bqWBlyok9I8KM1BgL1fZp+iOKUOsiEsRU1QfHSWiHrzLlsSBAkTYiGv8D\nlnPsxxQVZ/ulBZBfcNAIA/Cr3xps7z4Bjcc/7CzzFeaNd3+0v7gnJuHGrdB1U2HX\n+iDoDBiWpWB901FWLBeAI5vQpO0okaaZdprJ8SrrHuTiZCuEwpoJoIny8iCk3dY4\n9i4AB3iFAdLAod/18nyGF1rPFIMo70MZNA1jsuqvAQKBgQDXO2nRSiM3XEIDjfb9\nEKKTB5OgdQ2yE334vK4R3CPx2v0nsd8hTX1JRTk+kJ+2tuDmIgBpKRQF/ObQVDVD\n75CapVmQ2LAbUQbvYcFx5COZ7KPHgKAeuFmhG+cV3GMkuHfOWt17/RE4V/swjQ/n\nI7JSXLN/VSWC4JYgleXwnxacwQKBgQDEdYwl2x4X2ni+pIrNCS83iDtrM4ikyhil\nQzCFhsg7VqE80Q8QKpRnAg4dXn1g/gNnZBCWMosCVs7UCf1dgjJsnrIe7usRMveJ\nOk0VkvTvGqMTt5PzRtKfjYQATJkn9+zI2HgoAktLBo45gL4lBHW7f6apO+j+ks3s\nF0C+BdLLjwKBgQC2IMeFW6f7M62E1n/XW1lG85VfpU2Gj+n8LqVZ5Z/hC/9GtMRs\nqObItrQfFkCgW5ZqBwGz+xe/jWc/iNJd/32s7xigckxrgSBONrl8B6J8oPtiWZyl\nAjiOFU9xd0HKE/MFgmyDe/0zYXfkeKmpXNKL0Xfu2v1YB3XicxXVjLmUwQKBgQC3\nP5XMMciuI0CBQuWdPrXmLJKP+e+5FjFK5ZM62W+nubSID9DnGXB3bLlRt7NnZ0gx\nhmraTqbPNb2SlwbX0/vIyXYH2H82+b1fKRyBxSPma4g1egTs5ODNpqi7xrcNSvp4\nlUHuv8UPZDwBcw7pZHGUxQrlzFYWL0UYtM/U74WiDQKBgQDAmgQnB3czQVM4oguR\nWQB7iwVuwBfGDFeIwxPH1RMrMLAUnGiAzQewOyZcP0C08OmDkK0gSAkB2ZI5wgc/\nrQq0VrmJORVV11OGj3xp4dbK+cZlenMghsc+92F/4JbpHxHsV5PD/27AyQ3UWpEy\n4enSaG3lAPfWireFLE8aBQZuYQ==\n-----END PRIVATE KEY-----\n`
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const payload: RequestPayload = await req.json()
 
-    const { assignment_id }: RequestPayload = await req.json()
+    // --- HANDLE STUDENT SUBMISSION NOTIFICATION TO PROFESSOR ---
+    if (payload.submission_id) {
+      const { data: sub, error: subErr } = await supabase
+        .from("submissions")
+        .select("*, assignments(title, created_by), profiles(full_name)")
+        .eq("id", payload.submission_id)
+        .single()
+
+      if (subErr || !sub) {
+        return new Response(JSON.stringify({ error: "Submission not found" }), { status: 404, headers: corsHeaders })
+      }
+
+      const profId = sub.assignments?.created_by
+      const studentName = sub.profiles?.full_name || "A student"
+      const assignmentTitle = sub.assignments?.title || "Assignment"
+
+      // Fetch professor's active tokens (prefer Android APK token)
+      const { data: profTokens } = await supabase
+        .from("student_fcm_tokens")
+        .select("fcm_token, platform")
+        .eq("student_id", profId)
+        .eq("is_active", true)
+
+      if (!profTokens || profTokens.length === 0) {
+        return new Response(JSON.stringify({ message: "No active FCM tokens for professor.", sent_count: 0 }), { status: 200, headers: corsHeaders })
+      }
+
+      const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
+      let sentCount = 0
+
+      for (const record of profTokens) {
+        const fcmPayload = {
+          message: {
+            token: record.fcm_token,
+            notification: {
+              title: "Assignment Submitted",
+              body: `${studentName} submitted "${assignmentTitle}"`,
+            },
+            data: {
+              notification_type: "submission",
+              submission_id: String(payload.submission_id),
+              assignment_id: String(sub.assignment_id),
+              title: "Assignment Submitted",
+              body: `${studentName} submitted "${assignmentTitle}"`,
+              url: `/professor/submissions`,
+            },
+            android: {
+              priority: "HIGH",
+              notification: {
+                sound: "default",
+                channel_id: "edutrack_assignments",
+                notification_priority: "PRIORITY_HIGH",
+              },
+            },
+          },
+        }
+
+        const res = await fetch(`https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(fcmPayload),
+        })
+
+        if (res.ok) sentCount++
+      }
+
+      return new Response(JSON.stringify({ status: "success", sent_count: sentCount }), { status: 200, headers: corsHeaders })
+    }
+
+    // --- HANDLE NEW ASSIGNMENT NOTIFICATION TO STUDENTS ---
+    const { assignment_id } = payload
 
     if (!assignment_id) {
-      return new Response(JSON.stringify({ error: "Missing assignment_id" }), {
+      return new Response(JSON.stringify({ error: "Missing assignment_id or submission_id" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       })
@@ -128,35 +244,31 @@ serve(async (req) => {
 
     const professorName = professor?.full_name || "Professor"
 
-    // 3. Fetch all students matching targeting rules
+    // 3. Dynamically query student profiles
+    const allowedSections = assignment.all_sections
+      ? null
+      : (assignment.assignment_sections || []).map((s: any) => s.section.trim().toUpperCase())
+
     const { data: allStudents, error: studentErr } = await supabase
       .from("profiles")
       .select("id, department, year, section")
       .eq("role", "student")
 
-    if (studentErr || !allStudents) {
+    if (studentErr || !allStudents || allStudents.length === 0) {
       return new Response(
-        JSON.stringify({ error: `Failed to fetch students: ${studentErr?.message}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ message: "No registered student profiles found.", sent_count: 0 }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       )
     }
 
-    const allowedSections = assignment.all_sections
-      ? null
-      : (assignment.assignment_sections || []).map((s: any) => s.section.trim().toUpperCase())
-
-    const targetStudents = allStudents.filter((student) => {
-      // Branch check
-      if (assignment.target_branch && student.department) {
-        const tNorm = assignment.target_branch.toLowerCase()
-        const sNorm = student.department.toLowerCase()
-        if (!tNorm.includes(sNorm) && !sNorm.includes(tNorm)) return false
+    // Filter target students using smart branch matching
+    const targetStudents = allStudents.filter(student => {
+      if (assignment.target_branch && !checkBranchMatch(assignment.target_branch, student.department)) {
+        return false
       }
-      // Year check
       if (assignment.target_year && student.year) {
         if (Number(assignment.target_year) !== Number(student.year)) return false
       }
-      // Section check
       if (!assignment.all_sections && allowedSections && allowedSections.length > 0) {
         if (!student.section || !allowedSections.includes(student.section.trim().toUpperCase())) {
           return false
@@ -177,7 +289,7 @@ serve(async (req) => {
     // 4. Fetch active FCM tokens for target students
     const { data: tokenRecords, error: tokenErr } = await supabase
       .from("student_fcm_tokens")
-      .select("student_id, fcm_token")
+      .select("student_id, fcm_token, platform")
       .in("student_id", studentIds)
       .eq("is_active", true)
 
@@ -208,26 +320,13 @@ serve(async (req) => {
       )
     }
 
-    // 6. If Service Account Credentials are missing, log gracefully and return helpful state
-    if (!firebaseClientEmail || !firebasePrivateKey) {
-      console.warn("FCM credentials missing (FIREBASE_CLIENT_EMAIL or FIREBASE_PRIVATE_KEY). Skipping push notification dispatch.")
-      return new Response(
-        JSON.stringify({
-          status: "pending_credentials",
-          message: "FCM token records retrieved, but FIREBASE_CLIENT_EMAIL/PRIVATE_KEY secret is required for HTTP v1 push sending.",
-          eligible_tokens_count: eligibleTokens.length,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      )
-    }
-
-    // 7. Obtain Google OAuth2 access token
+    // 6. Obtain Google OAuth2 access token
     const accessToken = await getAccessToken(firebaseClientEmail, firebasePrivateKey)
 
     let sentCount = 0
     let failureCount = 0
 
-    // 8. Dispatch FCM notification for each token
+    // 7. Dispatch FCM notification for each token
     for (const record of eligibleTokens) {
       const fcmPayload = {
         message: {
@@ -241,12 +340,39 @@ serve(async (req) => {
             assignment_id: String(assignment.id),
             professor_id: String(assignment.created_by),
             deadline: String(assignment.deadline),
+            title: "New Assignment",
+            body: `${professorName} posted "${assignment.title}"`,
+            url: `/student/assignments/${assignment.id}`,
           },
           android: {
             priority: "HIGH",
             notification: {
               sound: "default",
               channel_id: "edutrack_assignments",
+              default_sound: true,
+              default_vibrate_timings: true,
+              notification_priority: "PRIORITY_HIGH",
+            },
+          },
+          webpush: {
+            headers: {
+              Urgency: "high",
+            },
+            notification: {
+              title: "New Assignment",
+              body: `${professorName} posted "${assignment.title}"`,
+              icon: "/icon-192.png",
+              badge: "/favicon.svg",
+              tag: `assignment-${assignment.id}`,
+              renotify: true,
+              data: {
+                assignment_id: String(assignment.id),
+                notification_type: "assignment",
+                url: `/student/assignments/${assignment.id}`,
+              },
+            },
+            fcm_options: {
+              link: `https://student-management-swart-one.vercel.app/student/assignments/${assignment.id}`,
             },
           },
         },
@@ -279,7 +405,6 @@ serve(async (req) => {
         const errorDetail = fcmData.error?.message || JSON.stringify(fcmData)
         console.error(`FCM send failed for token ${record.fcm_token.slice(0, 10)}...: ${errorDetail}`)
 
-        // If token is invalid or unregistered, deactivate it
         if (
           errorDetail.includes("UNREGISTERED") ||
           errorDetail.includes("INVALID_ARGUMENT") ||

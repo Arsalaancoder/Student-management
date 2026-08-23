@@ -192,7 +192,7 @@ export default function SimilarityReport() {
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto h-[calc(100vh-100px)] flex flex-col">
+    <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-[1400px] mx-auto min-h-screen lg:h-[calc(100vh-100px)] flex flex-col">
       
       {/* Header with Full Academic Identity */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
@@ -242,10 +242,10 @@ export default function SimilarityReport() {
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
         
         {/* Left Sidebar: Matched Sources List */}
-        <div className="col-span-4 flex flex-col space-y-4">
+        <div className="col-span-1 lg:col-span-4 flex flex-col space-y-4">
           <Card className="border-none shadow-sm rounded-3xl bg-white flex-1 overflow-hidden flex flex-col">
             <CardHeader className="p-5 border-b border-slate-100 bg-slate-50/50">
               <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">Matching Submissions ({matches.length})</CardTitle>
@@ -286,7 +286,7 @@ export default function SimilarityReport() {
         </div>
 
         {/* Right Area: Side-by-side comparison */}
-        <div className="col-span-8 flex flex-col space-y-4">
+        <div className="col-span-1 lg:col-span-8 flex flex-col space-y-4">
           <Card className="border-none shadow-sm rounded-3xl bg-white flex-1 overflow-hidden flex flex-col">
             <CardHeader className="p-5 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
