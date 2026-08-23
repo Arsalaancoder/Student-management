@@ -28,7 +28,7 @@ export default function StudentGrades() {
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [grades, setGrades] = useState<GradeData[]>([])
-  
+
   // Stats
   const [averagePercentage, setAveragePercentage] = useState(0)
   const [totalEarnedMarks, setTotalEarnedMarks] = useState(0)
@@ -41,7 +41,7 @@ export default function StudentGrades() {
     try {
       setLoading(true)
       setFetchError(null)
-      
+
       // Fetch all grades for this student through submissions
       const { data: gradesData, error } = await supabase
         .from("grades")
@@ -75,7 +75,7 @@ export default function StudentGrades() {
         const marks = Number(g.marks) || 0
         const credits = Number(g.credits) || 0
         const maxMarks = g.submissions?.assignments?.max_marks || 100
-        
+
         earnedMarks += marks
         possibleMarks += maxMarks
         earnedCredits += credits
@@ -118,20 +118,6 @@ export default function StudentGrades() {
 
   useEffect(() => {
     fetchGrades()
-
-    if (!profile) return
-
-    // Realtime listener for grade edits
-    const channel = supabase
-      .channel('realtime-grades')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'grades' }, () => {
-        fetchGrades()
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
   }, [profile])
 
   if (loading) {
@@ -158,7 +144,7 @@ export default function StudentGrades() {
           <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Grades & Academic Performance</h1>
           <p className="text-muted-foreground mt-1">Track your scores and professor feedback.</p>
         </div>
-        
+
         <Card className="border-none shadow-sm rounded-[2rem] bg-rose-50 border-rose-100 p-8 text-center">
           <div className="flex flex-col items-center justify-center space-y-4">
             <div className="p-4 bg-rose-100 rounded-full text-rose-600">
@@ -166,7 +152,7 @@ export default function StudentGrades() {
             </div>
             <h2 className="text-xl font-bold text-[#0B1E43]">Unable to load your grades</h2>
             <p className="text-sm text-slate-600 max-w-md">{fetchError}</p>
-            <Button 
+            <Button
               onClick={fetchGrades}
               className="rounded-full px-6 font-bold gap-2 bg-[#1E5EFF] hover:bg-[#1E5EFF]/90"
             >
@@ -180,7 +166,7 @@ export default function StudentGrades() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-7xl mx-auto">
-      
+
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Grades & Academic Performance</h1>
         <p className="text-muted-foreground mt-1">Track your scores and professor feedback.</p>
@@ -264,10 +250,10 @@ export default function StudentGrades() {
         </CardHeader>
         <CardContent className="px-8 pb-8">
           {grades.length === 0 ? (
-            <EmptyState 
-              icon={Award} 
-              title="No grades available yet." 
-              description="Your grades will appear here after your professor reviews and grades your submissions." 
+            <EmptyState
+              icon={Award}
+              title="No grades available yet."
+              description="Your grades will appear here after your professor reviews and grades your submissions."
             />
           ) : (
             <div className="space-y-4">
@@ -279,7 +265,7 @@ export default function StudentGrades() {
 
                 return (
                   <div key={grade.id} className="flex flex-col md:flex-row gap-6 p-6 border border-muted/50 rounded-3xl bg-white hover:border-primary/20 hover:shadow-sm transition-all group">
-                    
+
                     <div className="flex-1 space-y-3">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold tracking-wide uppercase">
@@ -290,13 +276,13 @@ export default function StudentGrades() {
                           Graded on {new Date(grade.gradedAt).toLocaleDateString()}
                         </span>
                       </div>
-                      
+
                       <Link to={`/student/assignments/${grade.assignmentId}`} className="inline-block">
                         <h3 className="font-bold text-lg text-[#0B1E43] leading-tight group-hover:text-primary transition-colors">
                           {grade.assignmentTitle}
                         </h3>
                       </Link>
-                      
+
                       <p className="text-sm text-muted-foreground">
                         Evaluated by <span className="font-medium text-foreground">Prof. {grade.professorName}</span>
                       </p>

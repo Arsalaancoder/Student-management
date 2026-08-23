@@ -4,12 +4,11 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Search, FileText, CheckCircle, Clock, Filter, AlertCircle, RefreshCw, Edit3 } from "lucide-react"
+import { Search, FileText, CheckCircle, Clock, Filter, AlertCircle, RefreshCw } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Link, useSearchParams } from "react-router-dom"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
-import EditMarksModal from "@/components/professor/EditMarksModal"
 
 interface AssignmentOption {
   id: string
@@ -30,13 +29,8 @@ interface SubmissionData {
   profilePhoto: string | null
   assignmentTitle: string
   subjectName: string
-  maxMarks: number
-  maxCredits: number
   status: string
   submittedAt: string
-  marks: number | null
-  credits: number | null
-  feedback: string | null
 }
 
 export default function ProfessorAllSubmissions() {
@@ -46,9 +40,6 @@ export default function ProfessorAllSubmissions() {
   const [submissions, setSubmissions] = useState<SubmissionData[]>([])
   const [myAssignments, setMyAssignments] = useState<AssignmentOption[]>([])
 
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [selectedSubForEdit, setSelectedSubForEdit] = useState<any | null>(null)
-  
   // Filter states initialized from URL search params if present
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedAssignment, setSelectedAssignment] = useState("all")
@@ -145,14 +136,6 @@ export default function ProfessorAllSubmissions() {
       } else {
         setSubmissions([])
       }
-
-    } catch (error) {
-      console.error("Error fetching submissions:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
     } catch (error) {
       console.error("Error fetching submissions:", error)
     } finally {
@@ -167,8 +150,8 @@ export default function ProfessorAllSubmissions() {
   // Multi-field Filtering Logic
   const filteredSubmissions = submissions.filter(s => {
     // 1. Text Search Query
-    const matchesSearch = !searchQuery.trim() || 
-      s.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = !searchQuery.trim() ||
+      s.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.studentId.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.department.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.assignmentTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -189,7 +172,7 @@ export default function ProfessorAllSubmissions() {
     // 6. Status Filter
     const matchesStatus = selectedStatus === "all" || (
       selectedStatus === "pending" ? (s.status === "submitted" || s.status === "under_review") :
-      s.status === selectedStatus
+        s.status === selectedStatus
     )
 
     return matchesSearch && matchesAssignment && matchesBranch && matchesYear && matchesSection && matchesStatus
@@ -221,7 +204,7 @@ export default function ProfessorAllSubmissions() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10 max-w-6xl mx-auto">
-      
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-[#0B1E43]">Submissions</h1>
@@ -229,8 +212,8 @@ export default function ProfessorAllSubmissions() {
         </div>
         <div className="relative w-full md:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search student, ID, or subject..." 
+          <Input
+            placeholder="Search student, ID, or subject..."
             className="pl-9 bg-white border-muted/50 rounded-2xl h-11 focus-visible:ring-primary/20"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -245,10 +228,10 @@ export default function ProfessorAllSubmissions() {
             <Filter className="h-4 w-4 text-[#1E5EFF]" />
             <h3 className="font-bold text-[#0B1E43] text-sm uppercase tracking-wider">Filter Submissions</h3>
           </div>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={resetFilters} 
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={resetFilters}
             className="text-xs text-slate-500 hover:text-slate-900 rounded-xl"
           >
             <RefreshCw className="h-3.5 w-3.5 mr-1" /> Reset Filters
@@ -356,17 +339,17 @@ export default function ProfessorAllSubmissions() {
         <CardContent className="p-0">
           {filteredSubmissions.length === 0 ? (
             <div className="p-12">
-              <EmptyState 
-                icon={FileText} 
-                title="No submissions found" 
-                description="Try adjusting your filters or search query." 
+              <EmptyState
+                icon={FileText}
+                title="No submissions found"
+                description="Try adjusting your filters or search query."
               />
             </div>
           ) : (
             <div className="divide-y divide-muted/50">
               {filteredSubmissions.map((sub) => {
                 const needsReview = sub.status === "submitted" || sub.status === "under_review"
-                
+
                 return (
                   <div key={sub.id} className="flex flex-col lg:flex-row lg:items-center justify-between p-6 hover:bg-slate-50 transition-colors gap-4">
                     <div className="flex items-start sm:items-center gap-4 min-w-0">
@@ -420,36 +403,11 @@ export default function ProfessorAllSubmissions() {
                         )}
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => {
-                            setSelectedSubForEdit({
-                              id: sub.id,
-                              studentName: sub.studentName,
-                              studentId: sub.studentId,
-                              assignmentId: sub.assignmentId,
-                              assignmentTitle: sub.assignmentTitle,
-                              maxMarks: sub.maxMarks,
-                              maxCredits: sub.maxCredits,
-                              currentMarks: sub.marks,
-                              currentCredits: sub.credits,
-                              currentFeedback: sub.feedback
-                            })
-                            setEditModalOpen(true)
-                          }}
-                          className="rounded-xl font-bold border-blue-200 text-[#1E5EFF] hover:bg-blue-50 dark:hover:bg-blue-900/40 gap-1.5 text-xs h-10 px-3"
-                        >
-                          <Edit3 className="h-3.5 w-3.5" /> Edit Marks
-                        </Button>
-                        <Button asChild className={`rounded-xl font-bold shadow-sm h-10 ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
-                          <Link to={`/professor/submissions/${sub.id}/review`}>
-                            {needsReview ? 'Review' : 'View Grade'}
-                          </Link>
-                        </Button>
-                      </div>
+                      <Button asChild className={`rounded-xl font-bold shadow-sm ${needsReview ? 'bg-[#1E5EFF] hover:bg-blue-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}>
+                        <Link to={`/professor/submissions/${sub.id}/review`}>
+                          {needsReview ? 'Review' : 'View Grade'}
+                        </Link>
+                      </Button>
                     </div>
                   </div>
                 )
@@ -458,21 +416,6 @@ export default function ProfessorAllSubmissions() {
           )}
         </CardContent>
       </Card>
-
-      {/* Edit Marks Modal */}
-      {selectedSubForEdit && (
-        <EditMarksModal
-          isOpen={editModalOpen}
-          onClose={() => {
-            setEditModalOpen(false)
-            setSelectedSubForEdit(null)
-          }}
-          onSuccess={() => {
-            fetchSubmissions()
-          }}
-          submission={selectedSubForEdit}
-        />
-      )}
     </div>
   )
 }
