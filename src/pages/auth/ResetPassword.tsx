@@ -6,6 +6,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Loader2, KeyRound, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react"
 import { toast } from "sonner"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/contexts/AuthContext"
 
 export default function ResetPassword() {
   const [newPassword, setNewPassword] = useState("")
@@ -16,26 +17,31 @@ export default function ResetPassword() {
   const [success, setSuccess] = useState(false)
 
   const navigate = useNavigate()
+  const { signOut, clearPasswordRecoveryState, isPasswordRecovery } = useAuth()
 
   useEffect(() => {
+    // Check initial hash/search params or active session
+    const hash = window.location.hash
+    const search = window.location.search
+
+    const hasToken = hash.includes("access_token") || 
+                     hash.includes("type=recovery") || 
+                     search.includes("type=recovery") || 
+                     search.includes("code=") ||
+                     isPasswordRecovery
+
     // Listen for PASSWORD_RECOVERY event or check for recovery session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "PASSWORD_RECOVERY" || session) {
+      if (event === "PASSWORD_RECOVERY" || session || hasToken) {
         setIsValidSession(true)
-        setVerifying(false)
       }
+      setVerifying(false)
     })
 
-    // Initial check
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
+      if (session || hasToken) {
         setIsValidSession(true)
-      } else {
-        // Check hash params if present
-        const hash = window.location.hash
-        if (hash && (hash.includes("type=recovery") || hash.includes("access_token"))) {
-          setIsValidSession(true)
-        }
       }
       setVerifying(false)
     })
@@ -43,7 +49,7 @@ export default function ResetPassword() {
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
+  }, [isPasswordRecovery])
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,8 +81,9 @@ export default function ResetPassword() {
       setSuccess(true)
       toast.success("Password updated successfully!")
 
-      // Sign out user so they log in fresh with new password
-      await supabase.auth.signOut()
+      // Clear recovery state & sign out user so they log in fresh with new password
+      clearPasswordRecoveryState()
+      await signOut()
 
       setTimeout(() => {
         navigate("/login", { replace: true })

@@ -1,10 +1,11 @@
-import { Outlet, Navigate } from "react-router-dom"
+import { Outlet, Navigate, useLocation } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import EduTrackLogo from "@/components/EduTrackLogo"
 
 export default function AuthLayout() {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, loading, isPasswordRecovery } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -18,8 +19,10 @@ export default function AuthLayout() {
     )
   }
 
-  // If already logged in and we know their role, redirect to dashboard
-  if (session && profile) {
+  const isResetRoute = location.pathname === "/reset-password"
+
+  // If already logged in and we know their role, redirect to dashboard UNLESS on reset route or in recovery session
+  if (session && profile && !isResetRoute && !isPasswordRecovery) {
     return <Navigate to={`/${profile.role}/dashboard`} replace />
   }
 

@@ -19,12 +19,14 @@ interface AuthContextType {
   profile: Profile | null
   loading: boolean
   profileError: boolean
+  isPasswordRecovery: boolean
   isWebAuthnSupported: boolean
   loginWithEmail: (email: string, password: string) => Promise<LoginResult>
   signOut: () => Promise<void>
   registerPasskey: () => Promise<any>
   loginWithPasskey: (email?: string) => Promise<any>
   refreshProfile: () => Promise<void>
+  clearPasswordRecoveryState: () => void
 }
 
 const isWebAuthnSupported = typeof window !== 'undefined' && window.PublicKeyCredential !== undefined;
@@ -35,12 +37,14 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   profileError: false,
+  isPasswordRecovery: false,
   isWebAuthnSupported,
   loginWithEmail: async () => ({ success: false }),
   signOut: async () => {},
   registerPasskey: async () => {},
   loginWithPasskey: async () => {},
-  refreshProfile: async () => {}
+  refreshProfile: async () => {},
+  clearPasswordRecoveryState: () => {}
 })
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -49,6 +53,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileError, setProfileError] = useState(false)
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(() => {
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash
+      const search = window.location.search
+      const pathname = window.location.pathname
+      return hash.includes("type=recovery") || search.includes("type=recovery") || pathname === "/reset-password"
+    }
+    return false
+  })
 
   const loadUserProfile = async (userId: string) => {
     setProfileError(false)
@@ -80,7 +93,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for authentication changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true)
+      } else if (event === "SIGNED_OUT") {
+        setIsPasswordRecovery(false)
+      }
+
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
@@ -166,11 +185,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  const clearPasswordRecoveryState = () => {
+    setIsPasswordRecovery(false)
+  }
+
   const signOut = async () => {
     setLoading(true)
     try {
       await supabase.auth.signOut()
     } finally {
+      setIsPasswordRecovery(false)
       setSession(null)
       setUser(null)
       setProfile(null)
@@ -214,12 +238,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile, 
       loading, 
       profileError, 
+      isPasswordRecovery,
       isWebAuthnSupported, 
       loginWithEmail, 
       signOut, 
       registerPasskey, 
       loginWithPasskey, 
-      refreshProfile 
+      refreshProfile,
+      clearPasswordRecoveryState
     }}>
       {children}
     </AuthContext.Provider>
