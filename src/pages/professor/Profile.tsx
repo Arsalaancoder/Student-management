@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { useState, useEffect, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,13 +19,15 @@ import {
   Upload,
   Edit3,
   X,
-  Check
+  Check,
+  AlertTriangle
 } from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
 export default function ProfessorProfile() {
-  const { user, profile, refreshProfile, registerPasskey, isWebAuthnSupported } = useAuth()
+  const { user, profile, refreshProfile, registerPasskey, isWebAuthnSupported, signOut } = useAuth()
+  const navigate = useNavigate()
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -32,6 +35,10 @@ export default function ProfessorProfile() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState("")
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   
   const [passkeys, setPasskeys] = useState<any[]>([])
   const [loadingPasskeys, setLoadingPasskeys] = useState(false)
@@ -246,6 +253,52 @@ export default function ProfessorProfile() {
       toast.error(error.message || "Unable to update your profile.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim() !== "DELETE") {
+      toast.error("Please type DELETE exactly to confirm account deletion.")
+      return
+    }
+
+    try {
+      setIsDeletingAccount(true)
+
+      // Administrative safety check: Sole Administrator Guard
+      const { count, error: countErr } = await supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "professor")
+
+      if (!countErr && count !== null && count <= 1) {
+        toast.error("You cannot delete the only administrator account. Create another administrator before deleting this account.")
+        setIsDeletingAccount(false)
+        setShowDeleteModal(false)
+        return
+      }
+
+      const { data, error } = await supabase.functions.invoke("delete-account")
+
+      if (error || data?.error) {
+        const errorMsg = error?.message || data?.error || "Unable to delete your account. No changes were made."
+        toast.error(errorMsg)
+        setIsDeletingAccount(false)
+        return
+      }
+
+      toast.success("Your account has been permanently deleted.")
+      setShowDeleteModal(false)
+
+      await signOut()
+      localStorage.clear()
+      sessionStorage.clear()
+
+      navigate("/login", { replace: true })
+    } catch (err: any) {
+      console.error("Delete account exception:", err)
+      toast.error(err.message || "Unable to delete your account. No changes were made.")
+      setIsDeletingAccount(false)
     }
   }
 
@@ -509,9 +562,95 @@ export default function ProfessorProfile() {
 
             </CardContent>
           </Card>
+
+          {/* Danger Zone Card */}
+          <Card className="border border-red-200 shadow-sm rounded-[2rem] bg-red-50/30">
+            <CardHeader className="p-8 pb-4 border-b border-red-100">
+              <CardTitle className="text-xl font-bold text-red-600 flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                Danger Zone
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-8 space-y-4">
+              <h3 className="text-base font-bold text-[#0B1E43]">Delete Account</h3>
+              <p className="text-sm text-muted-foreground">
+                Permanently delete your EduTrack administrator account and all associated data. This action is irreversible.
+              </p>
+              <div className="pt-2">
+                <Button
+                  onClick={() => {
+                    setDeleteConfirmText("")
+                    setShowDeleteModal(true)
+                  }}
+                  variant="destructive"
+                  className="rounded-full px-6 font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Delete Account
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
       </div>
+
+      {/* Delete Account Modal Dialog */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="p-3 bg-red-100 rounded-2xl">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <h3 className="text-xl font-bold text-[#0B1E43]">Delete your account?</h3>
+            </div>
+
+            <p className="text-sm text-slate-600 leading-relaxed">
+              This permanently deletes your EduTrack administrator account and associated account data. This action cannot be undone.
+            </p>
+
+            <div className="space-y-2 pt-2">
+              <label htmlFor="prof-delete-confirm" className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Type <span className="text-red-600 font-extrabold">DELETE</span> to confirm
+              </label>
+              <Input
+                id="prof-delete-confirm"
+                type="text"
+                placeholder="DELETE"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                disabled={isDeletingAccount}
+                className="h-12 bg-slate-50 border-slate-200 rounded-2xl focus-visible:ring-red-500/20 font-bold"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+              <Button
+                variant="outline"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={isDeletingAccount}
+                className="rounded-full px-5 h-11 border-slate-200 font-semibold hover:bg-slate-50"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirmText.trim() !== "DELETE" || isDeletingAccount}
+                className="rounded-full px-6 h-11 font-bold bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+              >
+                {isDeletingAccount ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...
+                  </>
+                ) : (
+                  "Delete My Account"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
