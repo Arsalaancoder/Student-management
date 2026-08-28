@@ -112,7 +112,7 @@ export default function Signup() {
             try {
               const errJson = await responseError.context.json()
               errMsg = errJson?.error || errJson?.message
-            } catch (_) {}
+            } catch (_) { }
           }
 
           const status = responseError.status || responseError.context?.status
@@ -350,11 +350,11 @@ export default function Signup() {
                   <Input
                     id="registrationNumber"
                     type="text"
-                    placeholder="Enter your registration number"
+                    placeholder="Enter Reg No"
                     value={registrationNumber}
                     onChange={(e) => setRegistrationNumber(e.target.value)}
                     disabled={loading}
-                    className="h-12 bg-slate-50 border-none rounded-2xl focus-visible:ring-primary/20 transition-all font-mono uppercase"
+                    className="h-12 bg-slate-50 border-none rounded-2xl focus-visible:ring-primary/20 transition font-mono"
                   />
                 </div>
 
