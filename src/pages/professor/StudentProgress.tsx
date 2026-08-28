@@ -85,14 +85,24 @@ export default function StudentProgress() {
       if (isManualRefresh) setRefreshing(true)
       else setLoading(true)
 
-      // 1. Fetch All Student Profiles
+      // 1. Fetch All Student Profiles sorted by student_id (roll number) ascending
       const { data: studentProfiles, error: studentErr } = await supabase
         .from("profiles")
         .select("id, auth_user_id, student_id, full_name, email, department, year, section")
         .eq("role", "student")
-        .order("full_name")
+        .order("student_id", { ascending: true, nullsFirst: false })
 
       if (studentErr) throw studentErr
+
+      // Natural alphanumeric sort on roll numbers
+      const sortedStudents = (studentProfiles || []).sort((a, b) => {
+        const idA = (a.student_id || a.id || "").toString().trim()
+        const idB = (b.student_id || b.id || "").toString().trim()
+        if (!idA && !idB) return 0
+        if (!idA) return 1
+        if (!idB) return -1
+        return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: "base" })
+      })
 
       // 2. Fetch Assignments created by professor (or all active assignments)
       const { data: assignmentsData, error: assignErr } = await supabase
@@ -133,7 +143,7 @@ export default function StudentProgress() {
         cMap.set(c.student_id, curr + Number(c.credits))
       })
 
-      setStudents(studentProfiles || [])
+      setStudents(sortedStudents)
       setAssignments(finalAssignments)
       setSubmissions(submissionsData || [])
       setGradesMap(gMap)
@@ -258,6 +268,16 @@ export default function StudentProgress() {
 
         records.push(record)
       })
+    })
+
+    // Ensure strict ascending sorting by Roll Number (regNo / student_id)
+    records.sort((a, b) => {
+      const regA = (a.regNo || "").toString().trim()
+      const regB = (b.regNo || "").toString().trim()
+      if (!regA && !regB) return 0
+      if (!regA) return 1
+      if (!regB) return -1
+      return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: "base" })
     })
 
     return records
