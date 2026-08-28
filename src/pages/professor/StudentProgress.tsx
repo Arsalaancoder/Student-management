@@ -226,7 +226,7 @@ export default function StudentProgress() {
         const isCompleted = Boolean(submission && ['submitted', 'under_review', 'approved', 'graded'].includes(submission.status))
         const creditsEarned = creditsMap.get(student.id) || 0
 
-        const regNo = student.student_id || student.id.slice(0, 8).toUpperCase()
+        const regNo = student.student_id ? student.student_id.trim().toUpperCase() : "-"
         const branchDisplay = student.department || "General"
         const sectionDisplay = student.section ? `Section ${student.section.trim().toUpperCase()}` : "A"
 
@@ -465,7 +465,7 @@ export default function StudentProgress() {
           const c = creditsMap.get(s.id) || 0
           return {
             "S.No": idx + 1,
-            "Register Number": s.student_id || s.id.slice(0, 8).toUpperCase(),
+            "Register Number": s.student_id ? s.student_id.trim().toUpperCase() : "-",
             "Student Name": s.full_name || "Student",
             "Email": s.email,
             "Branch": s.department || "General",

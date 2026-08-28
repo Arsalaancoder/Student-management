@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import EditEmailModal from "@/components/EditEmailModal"
 
 export default function ProfessorProfile() {
   const { user, profile, refreshProfile, registerPasskey, isWebAuthnSupported, signOut } = useAuth()
@@ -32,6 +33,7 @@ export default function ProfessorProfile() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   
   const [isEditing, setIsEditing] = useState(false)
+  const [showEditEmailModal, setShowEditEmailModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -421,15 +423,24 @@ export default function ProfessorProfile() {
             <CardContent className="p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
                 
-                {/* Non-editable Email field */}
-                <div className="grid gap-6 md:grid-cols-2 p-6 bg-slate-50 rounded-2xl border border-slate-100 mb-8">
-                  <div className="space-y-2">
+                {/* Email Address field with Edit Email option */}
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1 min-w-0">
                     <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                       <Mail className="h-3.5 w-3.5" /> Email Address
                     </label>
-                    <div className="font-semibold text-slate-700">{profile.email}</div>
+                    <div className="font-semibold text-slate-700 truncate">{profile.email || user?.email}</div>
                     <p className="text-[10px] text-muted-foreground">Managed by Supabase Auth</p>
                   </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowEditEmailModal(true)}
+                    className="rounded-full text-xs font-bold gap-1.5 border-primary/30 text-primary hover:bg-primary/5 shrink-0 self-start sm:self-auto"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" /> Edit Email
+                  </Button>
                 </div>
 
                 {/* Editable / Display fields */}
@@ -651,6 +662,14 @@ export default function ProfessorProfile() {
           </div>
         </div>
       )}
+
+      {/* Edit Email Modal Dialog */}
+      <EditEmailModal
+        isOpen={showEditEmailModal}
+        onClose={() => setShowEditEmailModal(false)}
+        currentEmail={profile.email || user?.email || ""}
+        role="professor"
+      />
     </div>
   )
 }

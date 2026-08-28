@@ -11,6 +11,7 @@ import EduTrackLogo from "@/components/EduTrackLogo"
 export default function Signup() {
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
+  const [registrationNumber, setRegistrationNumber] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [role, setRole] = useState<"student" | "professor">("student")
@@ -28,6 +29,7 @@ export default function Signup() {
       setDepartment("")
       setYear("")
       setSection("")
+      setRegistrationNumber("")
     } else {
       setAccessKey("")
     }
@@ -41,9 +43,36 @@ export default function Signup() {
       return
     }
 
-    if (role === "student" && !year) {
-      toast.error("Please select your year of study")
-      return
+    if (role === "student") {
+      const normReg = registrationNumber.trim().toUpperCase()
+      if (!normReg) {
+        toast.error("Registration number is required.")
+        return
+      }
+
+      const emailPrefix = email.includes("@") ? email.split("@")[0].trim().toUpperCase() : ""
+      if (!emailPrefix || normReg !== emailPrefix) {
+        toast.error("Registration number does not match your college email.")
+        return
+      }
+
+      if (!year) {
+        toast.error("Please select your year of study")
+        return
+      }
+
+      // Check if registration number already exists in database
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("role", "student")
+        .ilike("student_id", normReg)
+        .maybeSingle()
+
+      if (existingProfile) {
+        toast.error("An account with this registration number already exists.")
+        return
+      }
     }
 
     if (role === "professor" && (!accessKey || !accessKey.trim())) {
@@ -156,9 +185,11 @@ export default function Signup() {
         }
       } else {
         // Standard Student Signup
+        const normReg = registrationNumber.trim().toUpperCase()
         const userMetadata: Record<string, any> = {
           full_name: fullName,
           role: "student",
+          student_id: normReg,
         }
         if (department) userMetadata.department = department
         if (year) userMetadata.year = parseInt(year)
@@ -173,21 +204,33 @@ export default function Signup() {
         })
 
         if (error) {
-          toast.error(error.message)
+          if (error.message?.toLowerCase().includes("unique") || error.message?.toLowerCase().includes("already exists") || error.message?.includes("23505")) {
+            toast.error("An account with this registration number already exists.")
+          } else {
+            toast.error(error.message)
+          }
           return
         }
 
         if (data.user) {
           // Safe explicit upsert to profiles table referencing auth user UUID
-          await supabase.from("profiles").upsert({
+          const { error: upsertError } = await supabase.from("profiles").upsert({
             auth_user_id: data.user.id,
             email: email,
             full_name: fullName,
             role: "student",
+            student_id: normReg,
             department: department || null,
             year: year ? parseInt(year) : null,
             section: section || null,
           }, { onConflict: "auth_user_id" })
+
+          if (upsertError) {
+            if (upsertError.message?.toLowerCase().includes("unique") || upsertError.message?.toLowerCase().includes("already exists") || upsertError.code === "23505") {
+              toast.error("An account with this registration number already exists.")
+              return
+            }
+          }
 
           if (data.session) {
             toast.success("Account created successfully!")
@@ -300,6 +343,21 @@ export default function Signup() {
 
             {role === "student" && (
               <div className="space-y-4 animate-in fade-in duration-300">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none" htmlFor="registrationNumber">
+                    Registration Number <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    id="registrationNumber"
+                    type="text"
+                    placeholder="Enter your registration number"
+                    value={registrationNumber}
+                    onChange={(e) => setRegistrationNumber(e.target.value)}
+                    disabled={loading}
+                    className="h-12 bg-slate-50 border-none rounded-2xl focus-visible:ring-primary/20 transition-all font-mono uppercase"
+                  />
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium leading-none" htmlFor="department">
                     Branch / Department
