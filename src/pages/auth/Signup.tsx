@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter } from "@/components/ui/card"
-import { Loader2 } from "lucide-react"
+import { Loader2, Eye, EyeOff } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
 import EduTrackLogo from "@/components/EduTrackLogo"
@@ -17,6 +17,8 @@ export default function Signup() {
   const [department, setDepartment] = useState("")
   const [year, setYear] = useState("")
   const [section, setSection] = useState("")
+  const [accessKey, setAccessKey] = useState("")
+  const [showAccessKey, setShowAccessKey] = useState(false)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
@@ -26,6 +28,8 @@ export default function Signup() {
       setDepartment("")
       setYear("")
       setSection("")
+    } else {
+      setAccessKey("")
     }
   }
 
@@ -42,6 +46,11 @@ export default function Signup() {
       return
     }
 
+    if (role === "professor" && (!accessKey || !accessKey.trim())) {
+      toast.error("Professor access key is required.")
+      return
+    }
+
     if (password !== confirmPassword) {
       toast.error("Passwords do not match")
       return
@@ -54,47 +63,139 @@ export default function Signup() {
 
     setLoading(true)
     try {
-      const userMetadata: Record<string, any> = {
-        full_name: fullName,
-        role: role,
-      }
-      if (role === "student") {
+      if (role === "professor") {
+        // Professor Signup via Server-Side Edge Function / Secure Backend
+        let funcRes = await supabase.functions.invoke("register-professor", {
+          body: {
+            fullName,
+            email,
+            password,
+            accessKey: accessKey.trim(),
+          },
+        })
+
+        let responseData = funcRes.data
+        let responseError = funcRes.error
+
+        if (responseError) {
+          let errMsg = ""
+          if (responseError.context && typeof responseError.context.json === "function") {
+            try {
+              const errJson = await responseError.context.json()
+              errMsg = errJson?.error || errJson?.message
+            } catch (_) {}
+          }
+
+          const status = responseError.status || responseError.context?.status
+
+          if (status === 403 || errMsg?.includes("Invalid professor access key")) {
+            toast.error("Invalid professor access key. Please contact the administrator.")
+            setLoading(false)
+            return
+          }
+          if (status === 429 || errMsg?.includes("Too many failed attempts")) {
+            toast.error("Too many failed attempts. Please try again later.")
+            setLoading(false)
+            return
+          }
+          if (status === 400 && errMsg?.includes("required")) {
+            toast.error("Professor access key is required.")
+            setLoading(false)
+            return
+          }
+
+          // Fallback call to express server endpoint if local Deno edge function CLI is not running
+          try {
+            const backendRes = await fetch("/api/register-professor", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fullName, email, password, accessKey: accessKey.trim() })
+            })
+            const backendData = await backendRes.json().catch(() => ({}))
+            if (backendRes.ok && backendData.success) {
+              responseData = backendData
+              responseError = null
+            } else {
+              const bStatus = backendRes.status
+              const bMsg = backendData.error || ""
+              if (bStatus === 403 || bMsg.includes("Invalid professor access key")) {
+                toast.error("Invalid professor access key. Please contact the administrator.")
+              } else if (bStatus === 429 || bMsg.includes("Too many failed attempts")) {
+                toast.error("Too many failed attempts. Please try again later.")
+              } else if (bStatus === 400 && bMsg.includes("required")) {
+                toast.error("Professor access key is required.")
+              } else {
+                toast.error(bMsg || "Unable to verify professor access key. Please try again.")
+              }
+              setLoading(false)
+              return
+            }
+          } catch (fallbackErr) {
+            toast.error(errMsg || "Unable to verify professor access key. Please try again.")
+            setLoading(false)
+            return
+          }
+        }
+
+        if (responseData?.success || responseData?.user) {
+          // Log in automatically after registration
+          const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          })
+
+          if (!signInErr && signInData.session) {
+            toast.success("Account created successfully!")
+            navigate("/professor/dashboard", { replace: true })
+          } else {
+            toast.success("Professor account created successfully! Please log in.")
+            navigate("/login", { replace: true })
+          }
+        } else {
+          toast.error(responseData?.error || "Unable to verify professor access key. Please try again.")
+        }
+      } else {
+        // Standard Student Signup
+        const userMetadata: Record<string, any> = {
+          full_name: fullName,
+          role: "student",
+        }
         if (department) userMetadata.department = department
         if (year) userMetadata.year = parseInt(year)
         if (section) userMetadata.section = section
-      }
 
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: userMetadata
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: userMetadata
+          }
+        })
+
+        if (error) {
+          toast.error(error.message)
+          return
         }
-      })
 
-      if (error) {
-        toast.error(error.message)
-        return
-      }
+        if (data.user) {
+          // Safe explicit upsert to profiles table referencing auth user UUID
+          await supabase.from("profiles").upsert({
+            auth_user_id: data.user.id,
+            email: email,
+            full_name: fullName,
+            role: "student",
+            department: department || null,
+            year: year ? parseInt(year) : null,
+            section: section || null,
+          }, { onConflict: "auth_user_id" })
 
-      if (data.user) {
-        // Safe explicit upsert to profiles table referencing auth user UUID
-        await supabase.from("profiles").upsert({
-          auth_user_id: data.user.id,
-          email: email,
-          full_name: fullName,
-          role: role,
-          department: role === "student" ? (department || null) : null,
-          year: role === "student" ? (year ? parseInt(year) : null) : null,
-          section: role === "student" ? (section || null) : null,
-        }, { onConflict: "auth_user_id" })
-
-        if (data.session) {
-          toast.success("Account created successfully!")
-          navigate(`/${role}/dashboard`, { replace: true })
-        } else {
-          toast.success("Account created! Please check your email or log in.")
-          navigate("/login", { replace: true })
+          if (data.session) {
+            toast.success("Account created successfully!")
+            navigate("/student/dashboard", { replace: true })
+          } else {
+            toast.success("Account created! Please check your email or log in.")
+            navigate("/login", { replace: true })
+          }
         }
       }
     } catch (error: any) {
@@ -165,6 +266,37 @@ export default function Signup() {
                 </label>
               </div>
             </div>
+
+            {role === "professor" && (
+              <div className="space-y-2 animate-in fade-in duration-300">
+                <label className="text-sm font-medium leading-none" htmlFor="accessKey">
+                  Professor Access Key <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Input
+                    id="accessKey"
+                    type={showAccessKey ? "text" : "password"}
+                    placeholder="Enter professor access key"
+                    value={accessKey}
+                    onChange={(e) => setAccessKey(e.target.value)}
+                    disabled={loading}
+                    className="h-12 bg-slate-50 border-none rounded-2xl pr-12 focus-visible:ring-primary/20 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAccessKey(!showAccessKey)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                    tabIndex={-1}
+                  >
+                    {showAccessKey ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {role === "student" && (
               <div className="space-y-4 animate-in fade-in duration-300">
@@ -281,7 +413,19 @@ export default function Signup() {
             </div>
 
             <Button type="submit" className="w-full text-base py-6 mt-4 rounded-2xl transition-all duration-300 hover:shadow-md hover:-translate-y-0.5" disabled={loading}>
-              {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Create Account"}
+              {loading ? (
+                role === "professor" ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" /> Creating professor account...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" /> Creating account...
+                  </span>
+                )
+              ) : (
+                "Create Account"
+              )}
             </Button>
 
           </CardContent>

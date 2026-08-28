@@ -366,7 +366,90 @@ app.post('/api/plagiarism/retry', async (req, res) => {
   }
 });
 
+// POST Endpoint: Secure Professor Registration
+app.post('/api/register-professor', async (req, res) => {
+  const { fullName, email, password, accessKey } = req.body || {};
+
+  const clientIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown_ip').split(',')[0].trim();
+
+  try {
+    // Rate Limiting Check: Max 5 failed attempts per IP within last 15 minutes
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { count: failedAttempts } = await supabase
+      .from('professor_signup_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('ip_address', clientIp)
+      .gte('attempted_at', fifteenMinutesAgo);
+
+    if (failedAttempts !== null && failedAttempts >= 5) {
+      return res.status(429).json({ error: 'Too many failed attempts. Please try again later.' });
+    }
+
+    // Key Presence Check
+    if (!accessKey || typeof accessKey !== 'string' || !accessKey.trim()) {
+      return res.status(400).json({ error: 'Professor access key is required.' });
+    }
+
+    // Retrieve server secret key (defaults to NBKRIST-2K27)
+    const expectedKey = process.env.PROFESSOR_SIGNUP_KEY || 'NBKRIST-2K27';
+
+    // Secure Key Comparison
+    if (accessKey.trim() !== expectedKey.trim()) {
+      // Record failed attempt for rate limiting
+      await supabase.from('professor_signup_attempts').insert({
+        ip_address: clientIp,
+        attempted_at: new Date().toISOString()
+      });
+
+      return res.status(403).json({ error: 'Invalid professor access key. Please contact the administrator.' });
+    }
+
+    // Server-side validation succeeded! Create Supabase Auth User with service role
+    const { data: authData, error: authErr } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        role: 'professor'
+      },
+      app_metadata: {
+        role: 'professor',
+        is_verified_professor: true
+      }
+    });
+
+    if (authErr || !authData.user) {
+      return res.status(400).json({ error: authErr?.message || 'Unable to verify professor access key. Please try again.' });
+    }
+
+    // Explicitly update/upsert profile row with role='professor'
+    const { error: profileErr } = await supabase.from('profiles').upsert({
+      auth_user_id: authData.user.id,
+      email: email,
+      full_name: fullName,
+      role: 'professor'
+    }, { onConflict: 'auth_user_id' });
+
+    if (profileErr) {
+      console.error('Error creating professor profile:', profileErr);
+    }
+
+    // Clean up failed attempts for this IP after successful registration
+    await supabase
+      .from('professor_signup_attempts')
+      .delete()
+      .eq('ip_address', clientIp);
+
+    return res.json({ success: true, user: authData.user });
+  } catch (err) {
+    console.error('register-professor server exception:', err);
+    return res.status(500).json({ error: 'Unable to verify professor access key. Please try again.' });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Similarity Processing Service running on port ${PORT}`);
 });
+
