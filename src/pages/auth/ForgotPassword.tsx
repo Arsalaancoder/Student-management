@@ -39,9 +39,12 @@ export default function ForgotPassword() {
     setLoading(true)
 
     try {
-      // Determine redirect URL dynamically based on current origin
-      const origin = window.location.origin
-      const redirectTo = `${origin}/reset-password`
+      // Always target production domain for reset links so mobile/email clients don't hit localhost:3000
+      const baseUrl = (typeof window !== "undefined" && window.location.origin.includes("student-management"))
+        ? window.location.origin
+        : "https://student-management-swart-one.vercel.app"
+
+      const redirectTo = `${baseUrl}/reset-password`
 
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo,
