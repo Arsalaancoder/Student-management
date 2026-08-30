@@ -53,18 +53,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileError, setProfileError] = useState(false)
+  const isResetOrRecoveryPath = (pathname: string) => {
+    return (
+      pathname === "/reset-password" ||
+      pathname === "/update-password" ||
+      pathname === "/password-reset" ||
+      pathname === "/reset" ||
+      pathname.startsWith("/auth/")
+    )
+  }
+
   const [isPasswordRecovery, setIsPasswordRecovery] = useState(() => {
     if (typeof window !== "undefined") {
       const hash = window.location.hash
       const search = window.location.search
       const pathname = window.location.pathname
-      const resetPaths = ["/reset-password", "/update-password", "/auth/confirm", "/auth/v1/callback", "/auth/callback", "/reset"]
       return (
         hash.includes("type=recovery") || 
         search.includes("type=recovery") || 
         hash.includes("access_token") || 
         search.includes("code=") ||
-        resetPaths.includes(pathname)
+        isResetOrRecoveryPath(pathname)
       )
     }
     return false
@@ -105,6 +114,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsPasswordRecovery(true)
       } else if (event === "SIGNED_OUT") {
         setIsPasswordRecovery(false)
+      } else if (typeof window !== "undefined") {
+        const hash = window.location.hash
+        const search = window.location.search
+        const pathname = window.location.pathname
+        if (
+          hash.includes("type=recovery") || 
+          search.includes("type=recovery") || 
+          hash.includes("access_token") || 
+          search.includes("code=") ||
+          isResetOrRecoveryPath(pathname)
+        ) {
+          setIsPasswordRecovery(true)
+        }
       }
 
       setSession(session)
