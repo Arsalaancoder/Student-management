@@ -58,7 +58,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const hash = window.location.hash
       const search = window.location.search
       const pathname = window.location.pathname
-      return hash.includes("type=recovery") || search.includes("type=recovery") || pathname === "/reset-password"
+      const resetPaths = ["/reset-password", "/update-password", "/auth/confirm", "/auth/v1/callback", "/auth/callback", "/reset"]
+      return (
+        hash.includes("type=recovery") || 
+        search.includes("type=recovery") || 
+        hash.includes("access_token") || 
+        search.includes("code=") ||
+        resetPaths.includes(pathname)
+      )
     }
     return false
   })

@@ -1,5 +1,5 @@
 // EduTrack Privacy-Preserving PWA Service Worker
-const CACHE_NAME = 'edutrack-static-v3'
+const CACHE_NAME = 'edutrack-static-v4'
 
 const STATIC_ASSETS = [
   '/',

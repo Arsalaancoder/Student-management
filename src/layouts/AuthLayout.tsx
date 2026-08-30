@@ -19,7 +19,13 @@ export default function AuthLayout() {
     )
   }
 
-  const isResetRoute = location.pathname === "/reset-password"
+  const resetPaths = ["/reset-password", "/update-password", "/auth/confirm", "/auth/v1/callback", "/auth/callback", "/reset"]
+  const isResetRoute = resetPaths.includes(location.pathname)
+
+  // If password recovery session is active but user is not on reset route, navigate to /reset-password
+  if (isPasswordRecovery && location.pathname !== "/reset-password") {
+    return <Navigate to="/reset-password" replace />
+  }
 
   // If already logged in and we know their role, redirect to dashboard UNLESS on reset route or in recovery session
   if (session && profile && !isResetRoute && !isPasswordRecovery) {

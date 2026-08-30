@@ -24,6 +24,20 @@ export default function ResetPassword() {
     const hash = window.location.hash
     const search = window.location.search
 
+    // Handle error params from Supabase redirect (e.g., link expired)
+    if (hash.includes("error=") || search.includes("error=")) {
+      const searchParams = new URLSearchParams(search)
+      const errorDesc = searchParams.get("error_description") ||
+        (hash.includes("error_description=") ? decodeURIComponent(hash.split("error_description=")[1].split("&")[0]).replace(/\+/g, " ") : null)
+      
+      if (errorDesc) {
+        toast.error(errorDesc)
+      }
+      setIsValidSession(false)
+      setVerifying(false)
+      return
+    }
+
     const hasToken = hash.includes("access_token") || 
                      hash.includes("type=recovery") || 
                      search.includes("type=recovery") || 

@@ -58,6 +58,11 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/update-password" element={<ResetPassword />} />
+            <Route path="/auth/confirm" element={<ResetPassword />} />
+            <Route path="/auth/v1/callback" element={<ResetPassword />} />
+            <Route path="/auth/callback" element={<ResetPassword />} />
+            <Route path="/reset" element={<ResetPassword />} />
           </Route>
 
           {/* Student Routes */}
