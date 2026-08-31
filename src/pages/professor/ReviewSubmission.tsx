@@ -267,7 +267,7 @@ export default function ReviewSubmission() {
 
     } catch (error: any) {
       console.error("Error processing submission:", error)
-      toast.error("Unable to publish the result. Please try again.")
+      toast.error(error?.message || "Unable to publish the result. Please try again.")
     } finally {
       setSaving(false)
     }
