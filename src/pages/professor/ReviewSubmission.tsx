@@ -248,7 +248,13 @@ export default function ReviewSubmission() {
         }
       }
 
-      toast.success(isDraft ? "Draft saved successfully!" : `Submission ${newStatus} successfully!`)
+      if (isDraft) {
+        toast.success("Draft saved successfully!")
+      } else if (newStatus === "graded") {
+        toast.success("Marks and credits published successfully.")
+      } else {
+        toast.success(`Submission ${newStatus} successfully!`)
+      }
       
       // Update local state to reflect changes instead of forcing navigation if just approved
       setData({ ...data, status: newStatus, is_draft: isDraft })
@@ -261,7 +267,7 @@ export default function ReviewSubmission() {
 
     } catch (error: any) {
       console.error("Error processing submission:", error)
-      toast.error(error.message || "Failed to process submission")
+      toast.error("Unable to publish the result. Please try again.")
     } finally {
       setSaving(false)
     }

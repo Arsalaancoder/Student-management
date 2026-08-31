@@ -3,9 +3,8 @@ import { useState, useEffect, useMemo } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import * as XLSX from "xlsx"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -18,13 +17,11 @@ import {
   Filter, 
   Search, 
   RefreshCw, 
-  BookOpen, 
   FileSpreadsheet, 
   Building,
   Layers,
   ChevronRight,
-  ChevronLeft,
-  AlertCircle
+  ChevronLeft
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -39,20 +36,21 @@ import { normalizeBranch, isAssignmentTargetedToStudent } from "@/lib/targeting"
 import { useDebounce } from "@/hooks/useDebounce"
 
 const STANDARD_BRANCHES = [
-  { id: "cse", label: "CSE", full: "Computer Science & Engineering" },
-  { id: "aids", label: "AI & DS", full: "Artificial Intelligence & Data Science" },
-  { id: "aiml", label: "AI & ML", full: "Artificial Intelligence & Machine Learning" },
-  { id: "ece", label: "ECE", full: "Electronics & Communication" },
-  { id: "eee", label: "EEE", full: "Electrical & Electronics" },
-  { id: "mech", label: "MECH", full: "Mechanical Engineering" },
-  { id: "civil", label: "CIVIL", full: "Civil Engineering" },
-  { id: "it", label: "IT", full: "Information Technology" },
+  { id: "CSE", label: "CSE", full: "Computer Science & Engineering" },
+  { id: "AI&DS", label: "AI & DS", full: "Artificial Intelligence & Data Science" },
+  { id: "AI&ML", label: "AI & ML", full: "Artificial Intelligence & Machine Learning" },
+  { id: "ECE", label: "ECE", full: "Electronics & Communication" },
+  { id: "EEE", label: "EEE", full: "Electrical & Electronics" },
+  { id: "MECH", label: "MECH", full: "Mechanical Engineering" },
+  { id: "CIVIL", label: "CIVIL", full: "Civil Engineering" },
+  { id: "IT", label: "IT", full: "Information Technology" },
 ]
 
 export default function StudentProgress() {
   const { profile } = useAuth()
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Database Raw State
   const [students, setStudents] = useState<any[]>([])
@@ -82,29 +80,29 @@ export default function StudentProgress() {
   const fetchData = async (isManualRefresh = false) => {
     if (!profile) return
     try {
+      setFetchError(null)
       if (isManualRefresh) setRefreshing(true)
       else setLoading(true)
 
-      // 1. Fetch All Student Profiles sorted by student_id (roll number) ascending
+      // 1. Fetch All Real Student Profiles from Supabase
       const { data: studentProfiles, error: studentErr } = await supabase
         .from("profiles")
-        .select("id, auth_user_id, student_id, full_name, email, department, year, section")
+        .select("id, auth_user_id, student_id, full_name, email, department, year, section, role")
         .eq("role", "student")
-        .order("student_id", { ascending: true, nullsFirst: false })
 
       if (studentErr) throw studentErr
 
-      // Natural alphanumeric sort on roll numbers
+      // Natural alphanumeric sort on roll numbers / registration numbers
       const sortedStudents = (studentProfiles || []).sort((a, b) => {
-        const idA = (a.student_id || a.id || "").toString().trim()
-        const idB = (b.student_id || b.id || "").toString().trim()
+        const idA = (a.student_id || a.email || "").toString().trim()
+        const idB = (b.student_id || b.email || "").toString().trim()
         if (!idA && !idB) return 0
         if (!idA) return 1
         if (!idB) return -1
         return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: "base" })
       })
 
-      // 2. Fetch Assignments created by professor (or all active assignments)
+      // 2. Fetch Assignments
       const { data: assignmentsData, error: assignErr } = await supabase
         .from("assignments")
         .select("id, title, subject_name, target_branch, target_year, all_sections, max_marks, max_credits, created_at, created_by, assignment_sections(section)")
@@ -115,14 +113,14 @@ export default function StudentProgress() {
       const profAssignments = (assignmentsData || []).filter(a => !a.created_by || a.created_by === profile.id)
       const finalAssignments = profAssignments.length > 0 ? profAssignments : (assignmentsData || [])
 
-      // 3. Fetch All Submissions
+      // 3. Fetch Submissions
       const { data: submissionsData, error: subErr } = await supabase
         .from("submissions")
         .select("id, assignment_id, student_id, status, submitted_at")
 
       if (subErr) throw subErr
 
-      // 4. Fetch All Grades
+      // 4. Fetch Grades
       const { data: gradesData } = await supabase
         .from("grades")
         .select("id, submission_id, marks, graded_at")
@@ -151,7 +149,8 @@ export default function StudentProgress() {
 
     } catch (err: any) {
       console.error("Error fetching Student Progress data:", err)
-      toast.error("Unable to load student data. Please try again.")
+      setFetchError("Unable to load students. Please try again.")
+      toast.error("Unable to load students. Please try again.")
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -161,10 +160,11 @@ export default function StudentProgress() {
   useEffect(() => {
     fetchData()
 
-    // Realtime subscriptions with unique channel names
+    // Realtime subscriptions
     const channelId = `student-progress-realtime-${profile?.id || 'prof'}`
     const subChannel = supabase
       .channel(channelId)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "submissions" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "grades" }, () => fetchData(true))
       .on("postgres_changes", { event: "*", schema: "public", table: "assignments" }, () => fetchData(true))
@@ -181,7 +181,8 @@ export default function StudentProgress() {
     const sectionsSet = new Set<string>()
     students.forEach(s => {
       if (s.section && s.section.trim()) {
-        if (selectedBranch === "all" || normalizeBranch(s.department) === normalizeBranch(selectedBranch)) {
+        const sBranchNorm = normalizeBranch(s.department)
+        if (selectedBranch === "all" || sBranchNorm === normalizeBranch(selectedBranch)) {
           sectionsSet.add(s.section.trim().toUpperCase())
         }
       }
@@ -198,9 +199,7 @@ export default function StudentProgress() {
       subByStudentAssign.set(`${sub.student_id}_${sub.assignment_id}`, sub)
     })
 
-    const activeAssignments = selectedAssignmentId !== "all" 
-      ? assignments.filter(a => a.id === selectedAssignmentId)
-      : (assignments.length > 0 ? assignments : [{ id: "none", title: "General Progress", max_marks: 100 }])
+    const isAllAssignments = selectedAssignmentId === "all"
 
     students.forEach(student => {
       const studentBranchNorm = normalizeBranch(student.department)
@@ -213,32 +212,103 @@ export default function StudentProgress() {
         return
       }
 
-      activeAssignments.forEach(assign => {
-        // Skip assignment if not targeted to this student's profile
-        if (assign.id !== "none" && !isAssignmentTargetedToStudent(assign, student)) {
+      const regNo = student.student_id ? student.student_id.trim().toUpperCase() : (student.email ? student.email.split("@")[0].toUpperCase() : "-")
+      const name = student.full_name || student.email?.split("@")[0] || "Student"
+      const email = student.email || "-"
+      const branchDisplay = student.department || "General"
+      const sectionDisplay = student.section ? `Section ${student.section.trim().toUpperCase()}` : "A"
+      const creditsEarned = creditsMap.get(student.id) || 0
+
+      if (isAllAssignments) {
+        // Mode 1: Student-level aggregate row
+        let completedCount = 0
+        let totalTargeted = 0
+        let latestSubmissionTime: number | null = null
+        let latestSubmissionStr = "-"
+
+        assignments.forEach(assign => {
+          if (isAssignmentTargetedToStudent(assign, student)) {
+            totalTargeted++
+            const sub = subByStudentAssign.get(`${student.id}_${assign.id}`)
+            if (sub && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
+              completedCount++
+              if (sub.submitted_at) {
+                const t = new Date(sub.submitted_at).getTime()
+                if (!latestSubmissionTime || t > latestSubmissionTime) {
+                  latestSubmissionTime = t
+                  latestSubmissionStr = new Date(sub.submitted_at).toLocaleString()
+                }
+              }
+            }
+          }
+        })
+
+        let statusText = "Not Started"
+        if (totalTargeted > 0 && completedCount === totalTargeted) {
+          statusText = "Completed"
+        } else if (completedCount > 0) {
+          statusText = "In Progress"
+        }
+
+        const isCompleted = completedCount > 0
+
+        const record = {
+          id: student.id,
+          studentId: student.id,
+          regNo,
+          name,
+          email,
+          branch: branchDisplay,
+          branchNorm: studentBranchNorm,
+          section: sectionDisplay,
+          rawSection: student.section?.trim().toUpperCase() || "A",
+          assignmentTitle: totalTargeted > 0 ? `${completedCount} / ${totalTargeted} Completed` : "No Assignments",
+          completedCount,
+          totalTargeted,
+          isCompleted,
+          status: statusText,
+          submittedAt: latestSubmissionStr,
+          marks: totalTargeted > 0 ? `${completedCount}/${totalTargeted}` : "-",
+          credits: creditsEarned
+        }
+
+        if (selectedStatus === "completed" && !isCompleted) return
+        if (selectedStatus === "not_completed" && isCompleted) return
+        if (selectedStatus === "credits_earned" && creditsEarned <= 0) return
+
+        if (debouncedSearchQuery.trim()) {
+          const q = debouncedSearchQuery.toLowerCase().trim()
+          const matchName = name.toLowerCase().includes(q)
+          const matchReg = regNo.toLowerCase().includes(q)
+          const matchEmail = email.toLowerCase().includes(q)
+          if (!matchName && !matchReg && !matchEmail) return
+        }
+
+        records.push(record)
+      } else {
+        // Mode 2: Specific Assignment View
+        const assign = assignments.find(a => a.id === selectedAssignmentId)
+        if (!assign) return
+
+        if (!isAssignmentTargetedToStudent(assign, student)) {
           return
         }
 
-        const subKey = `${student.id}_${assign.id}`
-        const submission = subByStudentAssign.get(subKey)
-        const grade = submission ? gradesMap.get(submission.id) : null
+        const sub = subByStudentAssign.get(`${student.id}_${assign.id}`)
+        const grade = sub ? gradesMap.get(sub.id) : null
 
-        const isCompleted = Boolean(submission && ['submitted', 'under_review', 'approved', 'graded'].includes(submission.status))
-        const creditsEarned = creditsMap.get(student.id) || 0
+        const isCompleted = Boolean(sub && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status))
 
-        const regNo = student.student_id ? student.student_id.trim().toUpperCase() : "-"
-        const branchDisplay = student.department || "General"
-        const sectionDisplay = student.section ? `Section ${student.section.trim().toUpperCase()}` : "A"
-
-        let statusText = isCompleted ? "Completed" : "Not Completed"
-        if (submission?.status === "graded") statusText = "Graded"
+        let statusText = isCompleted ? "Submitted" : "Not Submitted"
+        if (sub?.status === "graded") statusText = "Graded"
+        if (sub?.status === "approved") statusText = "Approved"
 
         const record = {
           id: `${student.id}_${assign.id}`,
           studentId: student.id,
           regNo,
-          name: student.full_name || student.email?.split("@")[0] || "Student",
-          email: student.email,
+          name,
+          email,
           branch: branchDisplay,
           branchNorm: studentBranchNorm,
           section: sectionDisplay,
@@ -247,7 +317,7 @@ export default function StudentProgress() {
           assignmentTitle: assign.title || "N/A",
           isCompleted,
           status: statusText,
-          submittedAt: submission?.submitted_at ? new Date(submission.submitted_at).toLocaleString() : "-",
+          submittedAt: sub?.submitted_at ? new Date(sub.submitted_at).toLocaleString() : "-",
           marks: grade?.marks !== undefined ? `${grade.marks}/${assign.max_marks || 100}` : "-",
           rawMarks: grade?.marks !== undefined ? Number(grade.marks) : null,
           maxMarks: assign.max_marks || 100,
@@ -260,17 +330,17 @@ export default function StudentProgress() {
 
         if (debouncedSearchQuery.trim()) {
           const q = debouncedSearchQuery.toLowerCase().trim()
-          const matchName = record.name.toLowerCase().includes(q)
-          const matchReg = record.regNo.toLowerCase().includes(q)
-          const matchEmail = record.email.toLowerCase().includes(q)
+          const matchName = name.toLowerCase().includes(q)
+          const matchReg = regNo.toLowerCase().includes(q)
+          const matchEmail = email.toLowerCase().includes(q)
           if (!matchName && !matchReg && !matchEmail) return
         }
 
         records.push(record)
-      })
+      }
     })
 
-    // Ensure strict ascending sorting by Roll Number (regNo / student_id)
+    // Strict natural ascending sort by Roll Number / Registration Number
     records.sort((a, b) => {
       const regA = (a.regNo || "").toString().trim()
       const regB = (b.regNo || "").toString().trim()
@@ -296,10 +366,24 @@ export default function StudentProgress() {
     let totalCompleted = 0
     let totalPending = 0
 
-    const filteredStudentIds = new Set<string>()
-    studentRecords.forEach(r => {
-      filteredStudentIds.add(r.studentId)
-      if (r.isCompleted) totalCompleted++
+    const subByStudentAssign = new Map<string, any>()
+    submissions.forEach(sub => {
+      subByStudentAssign.set(`${sub.student_id}_${sub.assignment_id}`, sub)
+    })
+
+    students.forEach(s => {
+      let sCompleted = 0
+      let sTotal = 0
+      assignments.forEach(a => {
+        if (isAssignmentTargetedToStudent(a, s)) {
+          sTotal++
+          const sub = subByStudentAssign.get(`${s.id}_${a.id}`)
+          if (sub && ['submitted', 'under_review', 'approved', 'graded'].includes(sub.status)) {
+            sCompleted++
+          }
+        }
+      })
+      if (sCompleted > 0) totalCompleted++
       else totalPending++
     })
 
@@ -311,14 +395,14 @@ export default function StudentProgress() {
 
     return {
       totalRegistered: totalStudentsCount,
-      displayedStudents: filteredStudentIds.size,
+      displayedStudents: studentRecords.length,
       totalCompleted,
       totalPending,
       studentsWithCredits: studentsWithCreditsCount
     }
-  }, [students, studentRecords, creditsMap])
+  }, [students, assignments, submissions, creditsMap, studentRecords])
 
-  // Branch-Wise Statistics Calculation
+  // Branch-Wise Statistics Calculation (Real Supabase Data)
   const branchStatsList = useMemo(() => {
     return STANDARD_BRANCHES.map(branch => {
       const branchNorm = branch.id
@@ -420,9 +504,9 @@ export default function StudentProgress() {
           "Email": r.email,
           "Branch": r.branch,
           "Section": r.section,
-          "Assignment": r.assignmentTitle,
-          "Submission Status": r.status,
-          "Submitted At": r.submittedAt,
+          "Assignment/Summary": r.assignmentTitle,
+          "Status": r.status,
+          "Submitted Date/Last Activity": r.submittedAt,
           "Marks": r.marks,
           "Credits Earned": r.credits
         }))
@@ -438,7 +522,7 @@ export default function StudentProgress() {
           "Email": r.email,
           "Branch": r.branch,
           "Section": r.section,
-          "Assignment": r.assignmentTitle,
+          "Assignment/Summary": r.assignmentTitle,
           "Status": r.status,
           "Submitted Date": r.submittedAt,
           "Marks": r.marks,
@@ -453,7 +537,7 @@ export default function StudentProgress() {
           "Email": r.email,
           "Branch": r.branch,
           "Section": r.section,
-          "Assignment": r.assignmentTitle,
+          "Assignment/Summary": r.assignmentTitle,
           "Status": r.status,
           "Submitted Date": r.submittedAt,
           "Marks": r.marks,
@@ -608,10 +692,10 @@ export default function StudentProgress() {
               <div className="p-3 bg-emerald-50 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-300 rounded-2xl">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Completed</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active Progress</span>
             </div>
             <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">{overallStats.totalCompleted}</div>
-            <p className="text-xs text-muted-foreground mt-1 font-medium">Assignments submitted & verified</p>
+            <p className="text-xs text-muted-foreground mt-1 font-medium">Students with submitted assignments</p>
           </CardContent>
         </Card>
 
@@ -621,10 +705,10 @@ export default function StudentProgress() {
               <div className="p-3 bg-rose-50 text-rose-600 dark:bg-rose-900/40 dark:text-rose-300 rounded-2xl">
                 <Clock className="h-6 w-6" />
               </div>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Not Completed</span>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Not Started</span>
             </div>
             <div className="text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight">{overallStats.totalPending}</div>
-            <p className="text-xs text-muted-foreground mt-1 font-medium">Pending student submissions</p>
+            <p className="text-xs text-muted-foreground mt-1 font-medium">Students with zero submissions</p>
           </CardContent>
         </Card>
 
@@ -637,7 +721,7 @@ export default function StudentProgress() {
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Credits Earned</span>
             </div>
             <div className="text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight">{overallStats.studentsWithCredits}</div>
-            <p className="text-xs text-muted-foreground mt-1 font-medium">Students rewarded academic credits</p>
+            <p className="text-xs text-muted-foreground mt-1 font-medium">Students awarded academic credits</p>
           </CardContent>
         </Card>
       </div>
@@ -653,7 +737,7 @@ export default function StudentProgress() {
 
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           {branchStatsList.map(branch => {
-            const isSelected = selectedBranch.toLowerCase() === branch.id
+            const isSelected = selectedBranch.toUpperCase() === branch.id
             return (
               <Card 
                 key={branch.id} 
@@ -671,7 +755,7 @@ export default function StudentProgress() {
                       {branch.label}
                     </span>
                     <span className="text-2xl font-black text-[#0B1E43] dark:text-white">
-                      {branch.registered}
+                      {branch.registered} Students
                     </span>
                   </div>
 
@@ -685,15 +769,15 @@ export default function StudentProgress() {
                   {/* Clean Spacious Metrics List */}
                   <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-700">
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Completed:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Submissions Done:</span>
                       <span className="font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-md">{branch.completed}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Not Completed:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Pending Submissions:</span>
                       <span className="font-extrabold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-2 py-0.5 rounded-md">{branch.notCompleted}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Credits Earned:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Credits Awarded:</span>
                       <span className="font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-md">{branch.credits}</span>
                     </div>
                   </div>
@@ -731,7 +815,7 @@ export default function StudentProgress() {
                       Section {sec.section}
                     </span>
                     <span className="text-2xl font-black text-[#0B1E43] dark:text-white">
-                      {sec.registered}
+                      {sec.registered} Students
                     </span>
                   </div>
 
@@ -744,15 +828,15 @@ export default function StudentProgress() {
 
                   <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-700">
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Completed:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Submissions Done:</span>
                       <span className="font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-md">{sec.completed}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Not Completed:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Pending Submissions:</span>
                       <span className="font-extrabold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 px-2 py-0.5 rounded-md">{sec.notCompleted}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs font-semibold">
-                      <span className="text-slate-500 dark:text-slate-400">Credits Earned:</span>
+                      <span className="text-slate-500 dark:text-slate-400">Credits Awarded:</span>
                       <span className="font-extrabold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-md">{sec.credits}</span>
                     </div>
                   </div>
@@ -763,12 +847,28 @@ export default function StudentProgress() {
         </div>
       </div>
 
-      {/* Filter Controls Bar */}
-      <Card className="border-none shadow-xs rounded-[2rem] bg-white dark:bg-slate-800 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-primary" />
-            <span className="text-sm font-bold text-[#0B1E43] dark:text-white">Filter Student Records:</span>
+      {/* Search & Filter Controls Bar */}
+      <Card className="border-none shadow-xs rounded-[2rem] bg-white dark:bg-slate-800 p-6 space-y-4">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+          
+          {/* Search Input Bar */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search student by Name, Reg No (e.g. 24KB5A...), or Email..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-11 pr-4 h-11 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-xs font-bold text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1"
+              >
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Dropdown Filters */}
@@ -809,7 +909,7 @@ export default function StudentProgress() {
                 onChange={e => setSelectedAssignmentId(e.target.value)}
                 className="h-11 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:ring-primary/20 max-w-[180px] sm:max-w-[220px] truncate cursor-pointer"
               >
-                <option value="all">All Assignments</option>
+                <option value="all">All Assignments Overview</option>
                 {assignments.map(a => (
                   <option key={a.id} value={a.id}>{a.title}</option>
                 ))}
@@ -823,8 +923,8 @@ export default function StudentProgress() {
                 className="h-11 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-xs font-bold text-slate-700 dark:text-slate-200 focus:ring-primary/20 cursor-pointer"
               >
                 <option value="all">All Statuses</option>
-                <option value="completed">Completed</option>
-                <option value="not_completed">Not Completed</option>
+                <option value="completed">Completed / Active</option>
+                <option value="not_completed">Not Started</option>
                 <option value="credits_earned">Credits Earned</option>
               </select>
             </div>
@@ -852,9 +952,11 @@ export default function StudentProgress() {
       <Card className="border-none shadow-xs rounded-[2rem] bg-white dark:bg-slate-800 overflow-hidden">
         <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h3 className="text-lg font-bold text-[#0B1E43] dark:text-white">Student Performance Records</h3>
+            <h3 className="text-lg font-bold text-[#0B1E43] dark:text-white">
+              Student Progress {selectedBranch !== "all" ? `— ${selectedBranch.toUpperCase()} Students` : "— All Registered Students"}
+            </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Showing {studentRecords.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, studentRecords.length)} of {studentRecords.length} record(s)
+              Showing {studentRecords.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, studentRecords.length)} of {studentRecords.length} student record(s)
             </p>
           </div>
           <span className="text-xs font-extrabold text-primary bg-primary/10 px-3 py-1.5 rounded-full self-start sm:self-auto">
@@ -866,8 +968,8 @@ export default function StudentProgress() {
           <div className="p-12 text-center">
             <EmptyState
               icon={Users}
-              title="No student records found"
-              description="No student profiles match the selected branch, section, or assignment filters."
+              title={selectedBranch !== "all" ? `No registered students found in ${selectedBranch.toUpperCase()}` : "No registered students found"}
+              description={fetchError ? "Unable to load students. Please try again." : "No student profiles match the selected branch, section, or search filters."}
             />
           </div>
         ) : (
@@ -880,10 +982,14 @@ export default function StudentProgress() {
                     <th className="py-4 px-6">Student Name</th>
                     <th className="py-4 px-6">Branch</th>
                     <th className="py-4 px-6">Section</th>
-                    <th className="py-4 px-6">Assignment</th>
+                    <th className="py-4 px-6">
+                      {selectedAssignmentId === "all" ? "Assignments Progress" : "Assignment"}
+                    </th>
                     <th className="py-4 px-6">Status</th>
-                    <th className="py-4 px-6">Submitted At</th>
-                    <th className="py-4 px-6">Marks</th>
+                    <th className="py-4 px-6">
+                      {selectedAssignmentId === "all" ? "Last Activity" : "Submitted At"}
+                    </th>
+                    <th className="py-4 px-6">Marks / Progress</th>
                     <th className="py-4 px-6">Credits</th>
                   </tr>
                 </thead>
@@ -903,7 +1009,7 @@ export default function StudentProgress() {
                         </span>
                       </td>
                       <td className="py-4 px-6 text-slate-600 dark:text-slate-300 font-semibold">{r.section}</td>
-                      <td className="py-4 px-6 max-w-[200px] truncate text-slate-700 dark:text-slate-300 font-semibold" title={r.assignmentTitle}>
+                      <td className="py-4 px-6 max-w-[220px] truncate text-slate-700 dark:text-slate-300 font-semibold" title={r.assignmentTitle}>
                         {r.assignmentTitle}
                       </td>
                       <td className="py-4 px-6">
@@ -915,7 +1021,7 @@ export default function StudentProgress() {
                         ) : (
                           <Badge variant="outline" className="bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border-rose-200 font-bold text-xs px-2.5 py-0.5 rounded-full">
                             <Clock className="mr-1 h-3 w-3" />
-                            Not Completed
+                            {r.status}
                           </Badge>
                         )}
                       </td>

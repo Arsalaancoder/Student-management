@@ -4,15 +4,15 @@
 export function normalizeBranch(branch?: string | null): string {
   if (!branch) return ""
   const b = branch.trim().toLowerCase()
-  if (b.includes("computer science") || b.includes("cse")) return "cse"
-  if (b.includes("information technology") || b === "it" || b.includes("(it)")) return "it"
-  if (b.includes("electronics & communication") || b.includes("ece")) return "ece"
-  if (b.includes("electrical & electronics") || b.includes("eee")) return "eee"
-  if (b.includes("mechanical") || b.includes("mech")) return "mech"
-  if (b.includes("civil")) return "civil"
-  if (b.includes("machine learning") || b.includes("ai & ml") || b.includes("ai&ml") || b.includes("aiml")) return "aiml"
-  if (b.includes("data science") || b.includes("ai & ds") || b.includes("ai&ds") || b.includes("aids")) return "aids"
-  return b
+  if (b.includes("computer science") || b.includes("cse")) return "CSE"
+  if (b.includes("information technology") || b === "it" || b.includes("(it)")) return "IT"
+  if (b.includes("electronics & communication") || b.includes("ece")) return "ECE"
+  if (b.includes("electrical & electronics") || b.includes("eee")) return "EEE"
+  if (b.includes("mechanical") || b.includes("mech")) return "MECH"
+  if (b.includes("civil")) return "CIVIL"
+  if (b.includes("machine learning") || b.includes("ai & ml") || b.includes("ai&ml") || b.includes("aiml")) return "AI&ML"
+  if (b.includes("data science") || b.includes("ai & ds") || b.includes("ai&ds") || b.includes("aids")) return "AI&DS"
+  return b.toUpperCase()
 }
 
 /**

@@ -123,28 +123,37 @@ export type Database = {
       }
       credit_transactions: {
         Row: {
+          assignment_id: string | null
           created_at: string
+          created_by: string | null
           credits: number
           id: string
           reason: string | null
-          student_id: string | null
+          student_id: string
           submission_id: string | null
+          transaction_type: string
         }
         Insert: {
+          assignment_id?: string | null
           created_at?: string
-          credits: number
-          id?: string
-          reason?: string | null
-          student_id?: string | null
-          submission_id?: string | null
-        }
-        Update: {
-          created_at?: string
+          created_by?: string | null
           credits?: number
           id?: string
           reason?: string | null
-          student_id?: string | null
+          student_id: string
           submission_id?: string | null
+          transaction_type?: string
+        }
+        Update: {
+          assignment_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          credits?: number
+          id?: string
+          reason?: string | null
+          student_id?: string
+          submission_id?: string | null
+          transaction_type?: string
         }
         Relationships: [
           {
@@ -159,6 +168,13 @@ export type Database = {
             columns: ["submission_id"]
             isOneToOne: false
             referencedRelation: "submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: false
+            referencedRelation: "assignments"
             referencedColumns: ["id"]
           },
         ]
