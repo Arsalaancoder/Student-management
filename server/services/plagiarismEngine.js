@@ -16,7 +16,7 @@ async function getFeatureExtractor() {
 }
 
 /**
- * Common English stop words to exclude from naive feature hashing
+ * Common English stop words and generic academic terminology to exclude from feature hashing & coverage calculations
  */
 const STOP_WORDS = new Set([
   'a','about','above','after','again','against','all','am','an','and','any','are','aren\'t','as','at',
@@ -32,12 +32,12 @@ const STOP_WORDS = new Set([
   'this','those','through','to','too','under','until','up','very','was','wasn\'t','we','we\'d','we\'ll',
   'we\'re','we\'ve','were','weren\'t','what','what\'s','when','when\'s','where','where\'s','which',
   'while','who','who\'s','whom','why','why\'s','with','won\'t','would','wouldn\'t','you','you\'d',
-  'you\'ll','you\'re','you\'ve','your','yours','yourself','yourselves'
+  'you\'ll','you\'re','you\'ve','your','yours','yourself','yourselves',
+  'figure','table','chapter','section','paper','report','study','result','analysis','introduction','conclusion'
 ]);
 
 /**
  * Generate 384-dimensional vector embedding for text chunk.
- * Uses @xenova/transformers MiniLM if ready, or high-dimensional TF-IDF character/word n-gram vector fallback.
  */
 export async function generateChunkEmbedding(text, tokens) {
   const extractor = await getFeatureExtractor();
@@ -216,11 +216,32 @@ export function computeNGramSimilarity(targetTokens, candidateTokens, n = 4) {
 }
 
 /**
+ * COVERAGE FACTOR: Compute fraction of significant target tokens present in candidate document
+ */
+export function computeMatchedTokenCoverage(targetTokens, candidateTokens) {
+  if (!targetTokens || targetTokens.length === 0 || !candidateTokens || candidateTokens.length === 0) {
+    return { coverageRatio: 0, matchedCount: 0, totalCount: 0 };
+  }
+  const sigTarget = targetTokens.filter(t => t.length > 2 && !STOP_WORDS.has(t));
+  if (sigTarget.length === 0) return { coverageRatio: 0, matchedCount: 0, totalCount: 0 };
+
+  const candSet = new Set(candidateTokens);
+  let matchedCount = 0;
+  for (const t of sigTarget) {
+    if (candSet.has(t)) matchedCount++;
+  }
+  const coverageRatio = matchedCount / sigTarget.length;
+  return { coverageRatio, matchedCount, totalCount: sigTarget.length };
+}
+
+/**
  * ALGORITHM C & PARAGRAPH OVERRIDE
  */
 export async function compareChunksSemanticAndNgram(targetChunks, candidateChunks, candidateDocId) {
   let maxSemanticChunkScore = 0;
   let maxNGramChunkScore = 0;
+  let sumSemanticChunkScore = 0;
+  let validChunkComparisons = 0;
   const chunkMatches = [];
 
   for (let i = 0; i < targetChunks.length; i++) {
@@ -233,7 +254,7 @@ export async function compareChunksSemanticAndNgram(targetChunks, candidateChunk
       const cTokens = cChunk.tokens || (cChunk.normalizedText || cChunk.rawText || '').toLowerCase().split(/\s+/).filter(Boolean);
       const cEmb = cChunk.embedding || [];
 
-      // Semantic Cosine between chunk embeddings (0..100)
+      // Semantic Cosine between chunk embeddings (0..1)
       const semCos = calculateVectorCosine(tEmb, cEmb);
       const semPct = Math.round(semCos * 100);
 
@@ -241,11 +262,15 @@ export async function compareChunksSemanticAndNgram(targetChunks, candidateChunk
       const nGramRes = computeNGramSimilarity(tTokens, cTokens, 4);
       const nGramPct = nGramRes.score;
 
-      const combinedChunkScore = Math.round((semPct * 0.5) + (nGramPct * 0.5));
+      if (semCos > 0.35) {
+        sumSemanticChunkScore += semCos;
+        validChunkComparisons++;
+      }
 
-      if (semPct > maxSemanticChunkScore) maxSemanticChunkScore = semPct;
+      if (semCos > maxSemanticChunkScore) maxSemanticChunkScore = semCos;
       if (nGramPct > maxNGramChunkScore) maxNGramChunkScore = nGramPct;
 
+      const combinedChunkScore = Math.round((semPct * 0.5) + (nGramPct * 0.5));
       const wordCount = tChunk.wordCount || tTokens.length;
 
       if ((combinedChunkScore >= 70 || semPct >= 80 || nGramPct >= 75) && wordCount >= 10) {
@@ -264,10 +289,12 @@ export async function compareChunksSemanticAndNgram(targetChunks, candidateChunk
     }
   }
 
+  const meanSemanticChunkScore = validChunkComparisons > 0 ? (sumSemanticChunkScore / validChunkComparisons) : 0;
   chunkMatches.sort((a, b) => b.similarity_score - a.similarity_score);
 
   return {
     maxSemanticChunkScore,
+    meanSemanticChunkScore,
     maxNGramChunkScore,
     strongMatches: chunkMatches
   };
@@ -357,6 +384,7 @@ export async function runPlagiarismCheck({
       tfidfScore: 0,
       ngramScore: 0,
       semanticScore: 0,
+      matchedTokenCoverage: 0,
       wordCount: targetWordCount,
       highestMatchSubmissionId: null,
       highestMatchStudentId: null,
@@ -397,6 +425,7 @@ export async function runPlagiarismCheck({
       tfidfScore: 100,
       ngramScore: 100,
       semanticScore: 100,
+      matchedTokenCoverage: 100,
       wordCount: targetWordCount,
       exactMatchFound: true,
       decisionReason: exactMatchReason,
@@ -410,6 +439,7 @@ export async function runPlagiarismCheck({
         tfidf_score: 100,
         ngram_score: 100,
         semantic_score: 100,
+        matched_token_coverage: 100,
         reason: exactMatchReason
       }],
       message: 'Submission Blocked. Similarity detected: 100%. Significant similarity (exact duplicate) was found with an existing submission. Please revise your work and submit again.'
@@ -423,6 +453,7 @@ export async function runPlagiarismCheck({
   let highestTfidfPct = 0;
   let highestNgramPct = 0;
   let highestSemanticPct = 0;
+  let highestCoveragePct = 0;
   let highestMatchSubmissionId = null;
   let highestMatchStudentId = null;
   const allStoredMatches = [];
@@ -432,9 +463,16 @@ export async function runPlagiarismCheck({
   for (const candidate of validCandidates) {
     const candId = candidate.submission_id || candidate.id;
     const candTfidfPct = tfidfResult.scoresMap.get(candId) || 0; // 0..100
+    const candTfidfScore = candTfidfPct / 100; // 0..1
 
     // N-gram Similarity (4-grams, 0..100)
     const ngramRes = computeNGramSimilarity(targetTokens, candidate.tokens, 4);
+    const candNgramPct = ngramRes.score; // 0..100
+    const candNgramScore = candNgramPct / 100; // 0..1
+
+    // Coverage Factor (0..1)
+    const coverage = computeMatchedTokenCoverage(targetTokens, candidate.tokens);
+    const matchedTokenCoverage = coverage.coverageRatio; // 0..1
 
     // Semantic & Paragraph Chunk Comparisons
     const rawChunks = candidate.chunks || [];
@@ -452,22 +490,30 @@ export async function runPlagiarismCheck({
 
     const chunkRes = await compareChunksSemanticAndNgram(targetChunks, candChunks, candId);
 
-    const candNgramPct = Math.max(ngramRes.score, chunkRes.maxNGramChunkScore); // 0..100
-    const candSemanticPct = chunkRes.maxSemanticChunkScore; // 0..100
+    // Document Semantic Similarity (Mean over valid chunk pairs weighted by coverage)
+    const candSemanticScore = chunkRes.meanSemanticChunkScore; // 0..1
+    const candSemanticPct = Math.round(candSemanticScore * 100);
 
-    // Weighted Formula on 0..100 scale:
-    // (tfidf * 0.25) + (ngram * 0.35) + (semantic * 0.40)
-    let candidateFinalRaw = (candTfidfPct * 0.25) + (candNgramPct * 0.35) + (candSemanticPct * 0.40);
+    // Section 4: LEXICAL EVIDENCE GATING RULE
+    // If lexical overlap is very low (ngram < 0.10 and tfidf < 0.15), cap semantic contribution at 0.30
+    let effectiveSemantic = candSemanticScore;
+    if (candNgramScore < 0.10 && candTfidfScore < 0.15) {
+      effectiveSemantic = Math.min(candSemanticScore, 0.30);
+    }
 
-    // If paragraph copying override
+    // Section 2 & 3: Standardized Weighted Formula:
+    // TF-IDF = 35% (0.35), N-gram = 40% (0.40), Semantic = 25% (0.25)
+    let candidateFinalRaw = (candTfidfScore * 0.35) + (candNgramScore * 0.40) + (effectiveSemantic * 0.25);
+
+    // Section 7: Paragraph Copying Override (requires high chunk match AND substantial token coverage)
     if (Array.isArray(chunkRes.strongMatches) && chunkRes.strongMatches.length > 0) {
       const topParagraphPct = chunkRes.strongMatches[0].similarity_score; // 0..100
-      if (topParagraphPct >= 75) {
-        candidateFinalRaw = Math.max(candidateFinalRaw, topParagraphPct * 0.90);
+      if (topParagraphPct >= 80 && matchedTokenCoverage >= 0.30) {
+        candidateFinalRaw = Math.max(candidateFinalRaw, (topParagraphPct / 100) * 0.85);
       }
     }
 
-    let candidateFinalScorePct = Math.round(Math.max(0, Math.min(100, candidateFinalRaw)));
+    let candidateFinalScorePct = Math.round(Math.max(0, Math.min(100, candidateFinalRaw * 100)));
 
     if (candidateFinalScorePct > 0) {
       candidateMatchesSummary.push({
@@ -477,6 +523,10 @@ export async function runPlagiarismCheck({
         tfidf_score: candTfidfPct,
         ngram_score: candNgramPct,
         semantic_score: candSemanticPct,
+        effective_semantic_score: Math.round(effectiveSemantic * 100),
+        matched_token_coverage: Math.round(matchedTokenCoverage * 100),
+        highest_chunk_score: Math.round(chunkRes.maxSemanticChunkScore * 100),
+        average_chunk_score: Math.round(chunkRes.meanSemanticChunkScore * 100),
         strong_matches_count: chunkRes.strongMatches.length,
         top_match_preview: chunkRes.strongMatches[0]?.source_text?.substring(0, 300) || targetNormalizedText.substring(0, 300)
       });
@@ -491,6 +541,7 @@ export async function runPlagiarismCheck({
       highestTfidfPct = candTfidfPct;
       highestNgramPct = candNgramPct;
       highestSemanticPct = candSemanticPct;
+      highestCoveragePct = Math.round(matchedTokenCoverage * 100);
       highestMatchSubmissionId = candidate.submission_id;
       highestMatchStudentId = candidate.student_id;
     }
@@ -524,6 +575,7 @@ export async function runPlagiarismCheck({
     tfidfScore: highestTfidfPct,
     ngramScore: highestNgramPct,
     semanticScore: highestSemanticPct,
+    matchedTokenCoverage: highestCoveragePct,
     wordCount: targetWordCount,
     exactMatchFound: false,
     decisionReason: decisionStatus,

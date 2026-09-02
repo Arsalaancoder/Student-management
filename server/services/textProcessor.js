@@ -126,9 +126,12 @@ export function normalizeTextPipeline(rawText, templateText = null) {
   // 1. Unicode normalization
   let cleaned = rawText.normalize('NFC');
 
-  // 2. Remove common header/footer page number patterns
+  // 2. Remove common header/footer page numbers and academic metadata boilerplate
   cleaned = cleaned.replace(/page\s+\d+(\s+of\s+\d+)?/gi, ' ');
-  cleaned = cleaned.replace(/^\d+\s*\|\s*P\text{a}ge/gim, ' ');
+  cleaned = cleaned.replace(/^\d+\s*\|\s*Page/gim, ' ');
+  cleaned = cleaned.replace(/(student\s+name|reg(istration)?\s+no|roll\s+no|department|subject|course|assignment\s+\d+|submitted\s+by|submitted\s+to|instructor|professor|university|college|date)\s*:?[^\n]*/gi, ' ');
+  cleaned = cleaned.replace(/answer\s+the\s+following\s+questions?/gi, ' ');
+  cleaned = cleaned.replace(/question\s+\d+\s*:?/gi, ' ');
   cleaned = cleaned.replace(/\r\n/g, '\n');
 
   // 3. Extract paragraph chunks (split by single/double newlines or sentence blocks)
