@@ -307,10 +307,14 @@ export async function checkPlagiarismPreSubmission(
   let lastError: any = null
 
   for (const endpoint of endpoints) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 45000)
+
     try {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           fileBase64: base64,
           fileName: file.name,
@@ -319,15 +323,29 @@ export async function checkPlagiarismPreSubmission(
           studentId
         })
       })
+      clearTimeout(timeoutId)
 
+      const contentType = res.headers.get("content-type") || ""
       if (res.ok) {
-        return await res.json()
+        if (contentType.includes("application/json")) {
+          return await res.json()
+        } else {
+          const text = await res.text()
+          throw new Error(`Server returned non-JSON response (${res.status}): ${text.substring(0, 80)}`)
+        }
       } else {
-        const errorData = await res.json().catch(() => ({}))
+        const errorData = contentType.includes("application/json")
+          ? await res.json().catch(() => ({}))
+          : {}
         lastError = new Error(errorData.message || errorData.error || `HTTP error ${res.status}`)
       }
-    } catch (err) {
-      lastError = err
+    } catch (err: any) {
+      clearTimeout(timeoutId)
+      if (err.name === 'AbortError') {
+        lastError = new Error("Plagiarism pre-check took too long. Please try again.")
+      } else {
+        lastError = err
+      }
     }
   }
 
@@ -347,18 +365,29 @@ export async function finalizePlagiarismCheck(payload: {
   ]
 
   for (const endpoint of endpoints) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 20000)
+
     try {
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify(payload)
       })
+      clearTimeout(timeoutId)
 
+      const contentType = res.headers.get("content-type") || ""
       if (res.ok) {
-        return await res.json()
+        if (contentType.includes("application/json")) {
+          return await res.json()
+        }
+      } else {
+        console.warn(`[Finalize API] HTTP error ${res.status}`)
       }
-    } catch (err) {
-      // Continue to next endpoint
+    } catch (err: any) {
+      clearTimeout(timeoutId)
+      console.warn("[Finalize API] Network error or timeout:", err?.message || err)
     }
   }
 
@@ -371,18 +400,24 @@ export async function triggerSimilarityCheck(submissionId: string): Promise<any>
   ]
 
   for (const endpoint of endpoints) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+
     try {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ submissionId })
       })
+      clearTimeout(timeoutId)
 
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || ""
+      if (response.ok && contentType.includes("application/json")) {
         return await response.json()
       }
     } catch (err) {
-      // Continue to fallback
+      clearTimeout(timeoutId)
     }
   }
 
@@ -397,23 +432,30 @@ export async function triggerPlagiarismRetry(submissionId: string): Promise<any>
   ]
 
   for (const endpoint of endpoints) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000)
+
     try {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ submissionId })
       })
+      clearTimeout(timeoutId)
 
-      if (response.ok) {
+      const contentType = response.headers.get("content-type") || ""
+      if (response.ok && contentType.includes("application/json")) {
         return await response.json()
       }
     } catch (err) {
-      // Continue to fallback
+      clearTimeout(timeoutId)
     }
   }
 
   // Fallback to client-side processor
   return await processSimilarityClientFallback(submissionId)
 }
+
 
 

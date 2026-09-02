@@ -245,23 +245,28 @@ export default function AssignmentDetails() {
       setPlagiarismStep(1) // File validated
       setPlagiarismBlockedResult(null)
 
+      console.log('[FLOW] presubmitStarted')
+
       // Step 1: Pre-Submission Plagiarism Check
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 200))
       setPlagiarismStep(2) // Text extracted
 
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 200))
       setPlagiarismStep(3) // Comparing with previous submissions
 
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 200))
       setPlagiarismStep(4) // Checking phrase similarity
 
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 200))
       setPlagiarismStep(5) // Checking semantic similarity
 
       const checkRes = await checkPlagiarismPreSubmission(selectedFile, assignment.id, profile.id)
 
+      console.log('[FLOW] presubmitFinished', { status: checkRes?.status })
+      console.log('[FLOW] plagiarismDecision', { allowed: checkRes?.allowed, status: checkRes?.status, score: checkRes?.finalScore })
+
       setPlagiarismStep(6) // Finalizing report
-      await new Promise(r => setTimeout(r, 300))
+      await new Promise(r => setTimeout(r, 200))
 
       if (!checkRes.allowed || checkRes.status === 'blocked' || checkRes.status === 'failed' || checkRes.success === false) {
         setPlagiarismChecking(false)
@@ -281,6 +286,8 @@ export default function AssignmentDetails() {
       const fileExt = selectedFile.name.split('.').pop()
       const fileName = `${profile.id}/${assignment.id}/${Date.now()}.${fileExt}`
 
+      console.log('[FLOW] fileUploadStarted', { bucket: 'submissions', filePath: fileName, size: selectedFile.size, type: selectedFile.type })
+
       const { error: uploadError } = await supabase.storage
         .from('submissions')
         .upload(fileName, selectedFile, {
@@ -288,7 +295,12 @@ export default function AssignmentDetails() {
           upsert: false
         })
 
-      if (uploadError) throw uploadError
+      if (uploadError) {
+        console.error('[FLOW] fileUploadError', uploadError)
+        throw uploadError
+      }
+
+      console.log('[FLOW] fileUploadFinished', { filePath: fileName })
 
       const filePath = fileName
       let currentSubmissionId = submission?.id
@@ -296,6 +308,8 @@ export default function AssignmentDetails() {
       const submissionStatus = checkRes.status === 'flagged' ? 'flagged' : 'submitted'
 
       // Step 3: Insert / Update Submission Record
+      console.log('[FLOW] submissionInsertStarted', { assignmentId: assignment.id, studentId: profile.id })
+
       if (!currentSubmissionId) {
         const { data: newSub, error: subError } = await supabase
           .from("submissions")
@@ -309,9 +323,14 @@ export default function AssignmentDetails() {
           .select()
           .single()
 
-        if (subError) throw subError
+        if (subError) {
+          console.error('[FLOW] submissionInsertError', { code: subError.code, message: subError.message })
+          throw subError
+        }
         currentSubmissionId = newSub.id
         setSubmission(newSub)
+
+        console.log('[FLOW] submissionInsertFinished', { submissionId: currentSubmissionId, insertSuccess: true })
 
         await createNotification(
           assignment.created_by,
@@ -338,8 +357,13 @@ export default function AssignmentDetails() {
           })
           .eq("id", currentSubmissionId)
 
-        if (updateError) throw updateError
+        if (updateError) {
+          console.error('[FLOW] submissionUpdateError', { code: updateError.code, message: updateError.message })
+          throw updateError
+        }
         setSubmission({ ...submission, status: submissionStatus, similarity_score: checkRes.finalScore, current_version: newVersionNumber })
+
+        console.log('[FLOW] submissionInsertFinished', { submissionId: currentSubmissionId, updateSuccess: true })
 
         await createNotification(
           assignment.created_by,
@@ -371,8 +395,11 @@ export default function AssignmentDetails() {
 
       if (verError) throw verError
 
-      // Step 5: Finalize Plagiarism Check Records
-      await finalizePlagiarismCheck({
+      // Step 5: Finalize Plagiarism Check Records & Feature Persistence
+      console.log('[FLOW] finalizeStarted', { checkId: checkRes.checkId, submissionId: currentSubmissionId })
+      console.log('[FLOW] featuresPersistStarted', { checkId: checkRes.checkId, submissionId: currentSubmissionId })
+
+      const finalizeRes = await finalizePlagiarismCheck({
         checkId: checkRes.checkId,
         submissionId: currentSubmissionId,
         targetFeaturesData: checkRes.targetFeaturesData,
@@ -381,6 +408,9 @@ export default function AssignmentDetails() {
         status: checkRes.status
       })
 
+      console.log('[FLOW] featuresPersistFinished', { success: finalizeRes?.success !== false })
+      console.log('[FLOW] finalizeFinished', { success: finalizeRes?.success !== false })
+
       setVersions([newVersion, ...versions])
       setSelectedFile(null)
       setSimilarityReport({
@@ -388,6 +418,8 @@ export default function AssignmentDetails() {
         similarity_percentage: checkRes.finalScore,
         status: 'completed'
       })
+
+      console.log('[FLOW] uiSuccessReached')
 
       if (checkRes.status === 'flagged') {
         toast.warning(`Similarity detected: ${checkRes.finalScore}%. Your submission has been accepted but marked for professor review.`)
@@ -400,7 +432,7 @@ export default function AssignmentDetails() {
       })
 
     } catch (error: any) {
-      console.error("Error submitting assignment:", error)
+      console.error("[FLOW] uploadError", error)
       toast.error(error.message || "Failed to submit assignment")
     } finally {
       setUploading(false)

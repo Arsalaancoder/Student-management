@@ -11,51 +11,65 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
   const { checkId, submissionId, targetFeaturesData, matchesToInsert, finalScore, status } = req.body || {};
 
   if (!submissionId) {
-    return res.status(400).json({ error: 'submissionId is required.' });
+    return res.status(400).json({ success: false, error: 'submissionId is required.' });
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwMjAyODIsImV4cCI6MjEwMjU5NjI4Mn0.AQ1gQ5v4WQuqRxc1r4YT2iZvAeyWsL_giXw48QbVtOQ";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzAyMDI4MiwiZXhwIjoyMTAyNTk2MjgyfQ.haIHjC1lL7OSjfKPd5rogCd2_bvF73n_s69DMqDPB1U";
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
+  const timeoutGuard = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Finalize operation timed out')), 12000)
+  );
+
   try {
-    await finalizePlagiarismCheckRecords({
-      checkId,
-      submissionId,
-      targetFeaturesData,
-      matchesToInsert,
-      supabaseClient: supabase
-    });
+    await Promise.race([
+      (async () => {
+        await finalizePlagiarismCheckRecords({
+          checkId,
+          submissionId,
+          targetFeaturesData,
+          matchesToInsert,
+          supabaseClient: supabase
+        });
 
-    if (finalScore !== undefined) {
-      await supabase.from('plagiarism_reports').upsert({
-        submission_id: submissionId,
-        similarity_percentage: finalScore,
-        status: 'completed',
-        report_data: {
-          finalScore,
-          status,
-          analyzed_at: new Date().toISOString()
+        if (finalScore !== undefined) {
+          const { error: rptError } = await supabase.from('plagiarism_reports').upsert({
+            submission_id: submissionId,
+            similarity_percentage: finalScore,
+            status: 'completed',
+            report_data: {
+              finalScore,
+              status,
+              analyzed_at: new Date().toISOString()
+            }
+          }, { onConflict: 'submission_id' });
+
+          if (rptError) console.warn('[Finalize] Report upsert warning:', rptError.message);
+
+          const { error: subUpdateError } = await supabase.from('submissions').update({
+            similarity_score: finalScore,
+            status: status === 'flagged' ? 'flagged' : 'submitted',
+            updated_at: new Date().toISOString()
+          }).eq('id', submissionId);
+
+          if (subUpdateError) console.warn('[Finalize] Submission update warning:', subUpdateError.message);
         }
-      }, { onConflict: 'submission_id' });
+      })(),
+      timeoutGuard
+    ]);
 
-      await supabase.from('submissions').update({
-        similarity_score: finalScore,
-        status: status === 'flagged' ? 'flagged' : 'submitted',
-        updated_at: new Date().toISOString()
-      }).eq('id', submissionId);
-    }
-
-    return res.json({ success: true, message: 'Plagiarism check records finalized successfully.' });
+    return res.status(200).json({ success: true, message: 'Plagiarism check records finalized successfully.' });
   } catch (err) {
     console.error('Error finalizing plagiarism check:', err);
-    return res.status(500).json({ error: err.message || 'Failed to finalize plagiarism check.' });
+    return res.status(500).json({ success: false, error: err.message || 'Failed to finalize plagiarism check.' });
   }
 }
+
