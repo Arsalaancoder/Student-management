@@ -27,22 +27,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, errorCode: 'VALIDATION_ERROR', error: 'submissionId is required.' });
   }
 
-  console.log("[PLAG ENV CHECK FINALIZE]", {
-    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-    hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
-    vercelEnv: process.env.VERCEL_ENV || "unknown"
-  });
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  console.log("[PLAG ENV CHECK FINALIZE]", {
+    vercelEnv: process.env.VERCEL_ENV || "unknown",
+    hasSupabaseUrl: Boolean(supabaseUrl),
+    hasServiceRoleKey: Boolean(serviceRoleKey)
+  });
+
   if (!supabaseUrl || !serviceRoleKey) {
-    console.error('[PLAG ERROR]', {
+    console.error('[PLAG ENV MISSING]', {
       stage: '11 finalize env',
-      errorCode: 'SERVER_CONFIG_ERROR',
+      vercelEnv: process.env.VERCEL_ENV || "unknown",
       missingSupabaseUrl: !supabaseUrl,
-      missingServiceRoleKey: !serviceRoleKey,
-      vercelEnv: process.env.VERCEL_ENV
+      missingServiceRoleKey: !serviceRoleKey
     });
     return res.status(500).json({ success: false, errorCode: 'SERVER_CONFIG_ERROR', error: 'Originality service is temporarily unavailable. Please try again shortly.' });
   }

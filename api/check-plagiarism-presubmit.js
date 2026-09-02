@@ -33,22 +33,21 @@ export default async function handler(req, res) {
     });
   }
 
-  console.log("[PLAG ENV CHECK]", {
-    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
-    hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
-    vercelEnv: process.env.VERCEL_ENV || "unknown"
-  });
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  console.log("[PLAG ENV CHECK]", {
+    vercelEnv: process.env.VERCEL_ENV || "unknown",
+    hasSupabaseUrl: Boolean(supabaseUrl),
+    hasServiceRoleKey: Boolean(serviceRoleKey)
+  });
+
   if (!supabaseUrl || !serviceRoleKey) {
-    console.error("[PLAG ERROR]", {
+    console.error("[PLAG ENV MISSING]", {
       stage: "2 env verified",
-      errorCode: "SERVER_CONFIG_ERROR",
+      vercelEnv: process.env.VERCEL_ENV || "unknown",
       missingSupabaseUrl: !supabaseUrl,
-      missingServiceRoleKey: !serviceRoleKey,
-      vercelEnv: process.env.VERCEL_ENV
+      missingServiceRoleKey: !serviceRoleKey
     });
 
     return res.status(500).json({
@@ -60,6 +59,12 @@ export default async function handler(req, res) {
         "Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly."
     });
   }
+
+  console.log("[PLAG] 2 env verified", {
+    vercelEnv: process.env.VERCEL_ENV || "unknown",
+    hasSupabaseUrl: true,
+    hasServiceRoleKey: true
+  });
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
