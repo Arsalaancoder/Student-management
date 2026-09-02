@@ -35,6 +35,8 @@ export async function executePreSubmissionPlagiarismCheck({
     };
   }
 
+  console.log('[PLAGIARISM] 01 validation_complete', { assignmentId, studentId });
+
   // 2. Fetch Assignment Configuration (Thresholds, Plagiarism Toggle, Template Text)
   let assignmentData = null;
   const { data: fullAssign, error: assignErr } = await supabaseClient
@@ -94,8 +96,7 @@ export async function executePreSubmissionPlagiarismCheck({
   const templateText = assignment.template_text || null;
   const normData = normalizeTextPipeline(rawText, templateText);
 
-  console.log(`[PLAGIARISM DEBUG] File: ${fileName} | Extracted Char Count: ${rawText.length} | Word Count: ${normData.wordCount}`);
-  console.log(`[PLAGIARISM DEBUG] First 300 chars: ${rawText.substring(0, 300)}`);
+  console.log('[PLAGIARISM] 02 extraction_complete', { wordCount: normData.wordCount });
 
   // 5. Validate Minimum Word Count (Default >= 100 words)
   const wordVal = validateMinimumWordCount(normData.wordCount, 100);
@@ -136,7 +137,7 @@ export async function executePreSubmissionPlagiarismCheck({
   }
 
   const candidateCount = candidates ? candidates.length : 0;
-  console.log(`[PLAGIARISM DEBUG] CURRENT assignment_id: ${assignmentId} | CURRENT student_id: ${studentId} | candidateCount: ${candidateCount}`);
+  console.log('[PLAGIARISM] 03 candidates_loaded', { candidateCount });
 
   // 8. Execute Plagiarism Engine
   const analysisResult = await runPlagiarismCheck({
@@ -161,6 +162,10 @@ export async function executePreSubmissionPlagiarismCheck({
     matches,
     candidateMatches
   } = analysisResult;
+
+  console.log('[PLAGIARISM] 04 phrase_similarity_complete', { tfidfScore, ngramScore });
+  console.log('[PLAGIARISM] 05 semantic_similarity_complete', { semanticScore });
+  console.log('[PLAGIARISM] 06 final_score_calculated', { finalScore, status });
 
   // 9. Record Plagiarism Check Attempt in Database (For Auditability)
   const { data: checkRow, error: checkErr } = await supabaseClient
@@ -257,27 +262,45 @@ export async function finalizePlagiarismCheckRecords({
   try {
     if (checkId && submissionId) {
       // 1. Update check row with submission_id
-      await supabaseClient
+      const { error: checkErr } = await supabaseClient
         .from('plagiarism_checks')
         .update({ submission_id: submissionId, updated_at: new Date().toISOString() })
         .eq('id', checkId);
+
+      if (checkErr) {
+        console.error('Error updating plagiarism_checks submission_id:', checkErr);
+      }
     }
 
+    console.log('[PLAGIARISM] 17 plagiarism_check_update_finished', { checkId, submissionId, success: true });
+
     if (targetFeaturesData && submissionId) {
+      console.log('[PLAGIARISM] 18 features_insert_started', { checkId, submissionId, wordCount: targetFeaturesData?.word_count });
+
       // 2. Insert document features
-      await supabaseClient
+      const { error: featErr } = await supabaseClient
         .from('submission_document_features')
         .insert({
           ...targetFeaturesData,
           submission_id: submissionId
         });
+
+      if (featErr) {
+        console.error('Error inserting submission_document_features:', featErr);
+      }
+
+      console.log('[PLAGIARISM] 19 features_insert_finished', { submissionId, success: !featErr });
     }
 
     if (matchesToInsert && matchesToInsert.length > 0) {
       // 3. Insert plagiarism matches
-      await supabaseClient
+      const { error: matchErr } = await supabaseClient
         .from('plagiarism_matches')
         .insert(matchesToInsert);
+
+      if (matchErr) {
+        console.error('Error inserting plagiarism_matches:', matchErr);
+      }
     }
   } catch (err) {
     console.error('Error finalizing plagiarism check records:', err);

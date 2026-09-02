@@ -29,6 +29,9 @@ export default async function handler(req, res) {
     setTimeout(() => reject(new Error('Finalize operation timed out')), 12000)
   );
 
+  console.log('[PLAGIARISM] 15 finalize_handler_started', { checkId, submissionId });
+  console.log('[PLAGIARISM] 16 plagiarism_check_update_started', { checkId, submissionId });
+
   try {
     await Promise.race([
       (async () => {
@@ -66,6 +69,7 @@ export default async function handler(req, res) {
       timeoutGuard
     ]);
 
+    console.log('[PLAGIARISM] 20 finalize_response_sent', { httpStatus: 200, checkId, submissionId });
     return res.status(200).json({ success: true, message: 'Plagiarism check records finalized successfully.' });
   } catch (err) {
     console.error('Error finalizing plagiarism check:', err);
