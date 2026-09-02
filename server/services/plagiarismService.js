@@ -3,7 +3,9 @@ import {
   validateDocumentFile,
   extractRawText,
   normalizeTextPipeline,
-  validateMinimumWordCount
+  validateMinimumWordCount,
+  computeFileHash,
+  computeContentHash
 } from './textProcessor.js';
 import {
   generateChunkEmbedding,
@@ -30,6 +32,8 @@ export async function executePreSubmissionPlagiarismCheck({
   if (!fileVal.valid) {
     return {
       success: false,
+      allowed: false,
+      status: 'failed',
       errorType: 'VALIDATION_ERROR',
       message: fileVal.error
     };
@@ -37,35 +41,25 @@ export async function executePreSubmissionPlagiarismCheck({
 
   console.log('[PLAGIARISM] 01 validation_complete', { assignmentId, studentId });
 
-  // 2. Fetch Assignment Configuration (Thresholds, Plagiarism Toggle, Template Text)
+  // 2. Fetch Assignment Configuration (Optional - fallback defaults if missing)
   let assignmentData = null;
-  const { data: fullAssign, error: assignErr } = await supabaseClient
-    .from('assignments')
-    .select('*')
-    .eq('id', assignmentId)
-    .maybeSingle();
-
-  if (assignErr || !fullAssign) {
-    const { data: basicAssign } = await supabaseClient
+  try {
+    const { data: fullAssign } = await supabaseClient
       .from('assignments')
-      .select('id, title, description, deadline, created_by')
+      .select('*')
       .eq('id', assignmentId)
       .maybeSingle();
-
-    if (!basicAssign) {
-      throw new Error(`Assignment not found: ${assignErr?.message || assignmentId}`);
-    }
-    assignmentData = basicAssign;
-  } else {
     assignmentData = fullAssign;
+  } catch (e) {
+    console.warn('[PLAGIARISM] Assignment query warning (using default config):', e.message);
   }
 
   const assignment = {
-    ...assignmentData,
-    plagiarism_enabled: assignmentData.plagiarism_enabled ?? true,
-    plagiarism_review_threshold: Number(assignmentData.plagiarism_review_threshold ?? 20),
-    plagiarism_block_threshold: Number(assignmentData.plagiarism_block_threshold ?? 30),
-    template_text: assignmentData.template_text || null
+    id: assignmentId,
+    plagiarism_enabled: assignmentData?.plagiarism_enabled ?? true,
+    plagiarism_review_threshold: Number(assignmentData?.plagiarism_review_threshold ?? 20),
+    plagiarism_block_threshold: Number(assignmentData?.plagiarism_block_threshold ?? 30),
+    template_text: assignmentData?.template_text || null
   };
 
   // 3. Extract Raw Text
@@ -76,9 +70,10 @@ export async function executePreSubmissionPlagiarismCheck({
     console.error(`[PLAGIARISM ENGINE] Text extraction failed for ${fileName}:`, extractErr);
     return {
       success: false,
+      allowed: false,
       status: 'failed',
       errorType: 'EXTRACTION_ERROR',
-      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX.'
+      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
 
@@ -86,23 +81,34 @@ export async function executePreSubmissionPlagiarismCheck({
     console.error(`[PLAGIARISM ENGINE] Extracted text is empty for ${fileName}`);
     return {
       success: false,
+      allowed: false,
       status: 'failed',
       errorType: 'EXTRACTION_ERROR',
-      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX.'
+      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
 
-  // 4. Normalize Text Pipeline & Exclude Assignment Template Text
+  // 4. Normalize Text Pipeline & Compute Hashes
   const templateText = assignment.template_text || null;
   const normData = normalizeTextPipeline(rawText, templateText);
+  const fileHash = computeFileHash(fileBuffer);
+  const contentHash = computeContentHash(normData.normalizedFullText);
 
-  console.log('[PLAGIARISM] 02 extraction_complete', { wordCount: normData.wordCount });
+  // Development-Safe Logging: Only first 8 chars of content hash
+  console.log('[PLAGIARISM] 02 extraction_and_hashes_complete', {
+    studentId,
+    assignmentId,
+    wordCount: normData.wordCount,
+    normalizedTextLength: normData.normalizedFullText.length,
+    contentHashPrefix: contentHash.substring(0, 8)
+  });
 
   // 5. Validate Minimum Word Count (Default >= 100 words)
   const wordVal = validateMinimumWordCount(normData.wordCount, 100);
   if (!wordVal.valid) {
     return {
       success: false,
+      allowed: false,
       status: 'failed',
       errorType: 'INSUFFICIENT_CONTENT',
       message: wordVal.error
@@ -119,17 +125,19 @@ export async function executePreSubmissionPlagiarismCheck({
     });
   }
 
-  // 7. Retrieve Candidate Document Features for the SAME assignment_id (Excluding current student)
+  // 7. Retrieve Candidate Document Features for SAME assignment_id (EXCLUDING current student)
   const { data: candidates, error: candErr } = await supabaseClient
     .from('submission_document_features')
     .select('*')
     .eq('assignment_id', assignmentId)
-    .neq('student_id', studentId);
+    .neq('student_id', studentId)
+    .eq('finalized', true);
 
   if (candErr) {
-    console.error(`[PLAGIARISM ENGINE] Database error fetching document features for assignment ${assignmentId}:`, candErr);
+    console.error(`[PLAGIARISM ENGINE] Database error fetching candidate document features:`, candErr);
     return {
       success: false,
+      allowed: false,
       status: 'failed',
       errorType: 'DATABASE_ERROR',
       message: 'Plagiarism checking is temporarily unavailable due to a database query error.'
@@ -137,7 +145,7 @@ export async function executePreSubmissionPlagiarismCheck({
   }
 
   const candidateCount = candidates ? candidates.length : 0;
-  console.log('[PLAGIARISM] 03 candidates_loaded', { candidateCount });
+  console.log('[PLAGIARISM] 03 candidates_loaded', { candidateCount, excludingStudent: studentId });
 
   // 8. Execute Plagiarism Engine
   const analysisResult = await runPlagiarismCheck({
@@ -146,6 +154,8 @@ export async function executePreSubmissionPlagiarismCheck({
     targetChunks: chunksWithEmbeddings,
     targetWordCount: normData.wordCount,
     targetStudentId: studentId,
+    targetContentHash: contentHash,
+    targetFileHash: fileHash,
     assignmentId: assignmentId,
     assignmentConfig: assignment,
     candidateFeatures: candidates || []
@@ -153,6 +163,8 @@ export async function executePreSubmissionPlagiarismCheck({
 
   const {
     status,
+    allowed,
+    comparisonCount,
     finalScore,
     tfidfScore,
     ngramScore,
@@ -160,45 +172,58 @@ export async function executePreSubmissionPlagiarismCheck({
     highestMatchSubmissionId,
     highestMatchStudentId,
     matches,
-    candidateMatches
+    candidateMatches,
+    message
   } = analysisResult;
 
-  console.log('[PLAGIARISM] 04 phrase_similarity_complete', { tfidfScore, ngramScore });
-  console.log('[PLAGIARISM] 05 semantic_similarity_complete', { semanticScore });
-  console.log('[PLAGIARISM] 06 final_score_calculated', { finalScore, status });
+  console.log('[PLAGIARISM] 04 similarity_check_complete', {
+    status,
+    allowed,
+    comparisonCount,
+    finalScore,
+    contentHashPrefix: contentHash.substring(0, 8)
+  });
 
-  // 9. Record Plagiarism Check Attempt in Database (For Auditability)
-  const { data: checkRow, error: checkErr } = await supabaseClient
-    .from('plagiarism_checks')
-    .insert({
-      assignment_id: assignmentId,
-      submission_id: null, // Assigned after submission creation
-      student_id: studentId,
-      word_count: normData.wordCount,
-      tfidf_score: tfidfScore,
-      ngram_score: ngramScore,
-      semantic_score: semanticScore,
-      final_score: finalScore,
-      status: status,
-      highest_match_submission_id: highestMatchSubmissionId,
-      highest_match_student_id: highestMatchStudentId,
-      error_message: null
-    })
-    .select()
-    .single();
+  // 9. Record Plagiarism Check Attempt in Database (For Audit Trail)
+  let checkId = null;
+  try {
+    const { data: checkRow, error: checkErr } = await supabaseClient
+      .from('plagiarism_checks')
+      .insert({
+        assignment_id: assignmentId,
+        submission_id: null,
+        student_id: studentId,
+        word_count: normData.wordCount,
+        file_hash: fileHash,
+        content_hash: contentHash,
+        tfidf_score: tfidfScore,
+        ngram_score: ngramScore,
+        semantic_score: semanticScore,
+        final_score: finalScore,
+        status: status,
+        highest_match_submission_id: highestMatchSubmissionId,
+        highest_match_student_id: highestMatchStudentId,
+        error_message: null
+      })
+      .select()
+      .single();
 
-  if (checkErr) {
-    console.error('Error inserting plagiarism_checks record:', checkErr);
+    if (checkErr) {
+      console.warn('Warning inserting plagiarism_checks record:', checkErr.message);
+    } else {
+      checkId = checkRow?.id;
+    }
+  } catch (e) {
+    console.warn('Non-fatal error creating plagiarism_checks audit row:', e);
   }
 
-  const checkId = checkRow?.id;
-
   // If BLOCK: Return block response immediately. DO NOT create final submission!
-  if (status === 'blocked') {
+  if (status === 'blocked' || allowed === false) {
     return {
       success: true,
       allowed: false,
       status: 'blocked',
+      comparisonCount,
       finalScore,
       tfidfScore,
       ngramScore,
@@ -206,15 +231,23 @@ export async function executePreSubmissionPlagiarismCheck({
       reviewThreshold: assignment.plagiarism_review_threshold,
       blockThreshold: assignment.plagiarism_block_threshold,
       checkId,
-      message: `Submission Blocked. Similarity detected: ${finalScore}%. Significant similarity was found with an existing submission. Please revise your work and submit again.`
+      // Debug Response Fields (Safe prefixes only)
+      candidateCount,
+      currentStudentId: studentId,
+      currentWordCount: normData.wordCount,
+      currentContentHashPrefix: contentHash.substring(0, 8),
+      exactHashMatchFound: analysisResult.exactMatchFound ?? false,
+      message: message || `Submission Blocked. Similarity detected: ${finalScore}%. Significant similarity was found with an existing submission. Please revise your work and submit again.`
     };
   }
 
-  // If PASS or FLAG: Return allowed status along with extracted features ready to be saved upon submission completion
+  // If PASS, FLAG, or NO_CANDIDATES: Return allowed status along with extracted features ready to be saved upon submission completion
   return {
     success: true,
     allowed: true,
-    status: status, // 'passed' or 'flagged'
+    status: status, // 'no_candidates', 'passed', or 'flagged'
+    comparisonCount,
+    candidateCount,
     finalScore,
     tfidfScore,
     ngramScore,
@@ -222,12 +255,21 @@ export async function executePreSubmissionPlagiarismCheck({
     reviewThreshold: assignment.plagiarism_review_threshold,
     blockThreshold: assignment.plagiarism_block_threshold,
     checkId,
+    // Debug Response Fields (Safe prefixes only)
+    currentStudentId: studentId,
+    currentWordCount: normData.wordCount,
+    currentContentHashPrefix: contentHash.substring(0, 8),
+    exactHashMatchFound: false,
+
     targetFeaturesData: {
       plagiarism_check_id: checkId,
       assignment_id: assignmentId,
       student_id: studentId,
+      file_hash: fileHash,
+      content_hash: contentHash,
       normalized_text: normData.normalizedFullText,
       word_count: normData.wordCount,
+      finalized: true,
       ngram_features: normData.tokens.slice(0, 500),
       chunks: normData.chunks.map(c => ({ index: c.index, rawText: c.rawText, wordCount: c.wordCount })),
       chunk_embeddings: chunksWithEmbeddings.map(c => ({ index: c.index, embedding: c.embedding }))
@@ -243,9 +285,11 @@ export async function executePreSubmissionPlagiarismCheck({
       match_type: m.match_type
     })),
     candidateMatchesSummary: candidateMatches,
-    message: status === 'flagged'
-      ? `Similarity detected: ${finalScore}%. Your submission has been accepted but marked for professor review.`
-      : `Originality Check Passed. Similarity: ${finalScore}%.`
+    message: status === 'no_candidates'
+      ? 'Originality check passed. No previous submissions were available for comparison.'
+      : status === 'flagged'
+        ? `Similarity detected: ${finalScore}%. Your submission has been accepted but marked for professor review.`
+        : `Originality Check Passed. Similarity: ${finalScore}%.`
   };
 }
 
@@ -261,46 +305,36 @@ export async function finalizePlagiarismCheckRecords({
 }) {
   try {
     if (checkId && submissionId) {
-      // 1. Update check row with submission_id
       const { error: checkErr } = await supabaseClient
         .from('plagiarism_checks')
         .update({ submission_id: submissionId, updated_at: new Date().toISOString() })
         .eq('id', checkId);
 
-      if (checkErr) {
-        console.error('Error updating plagiarism_checks submission_id:', checkErr);
-      }
+      if (checkErr) console.warn('Warning updating plagiarism_checks submission_id:', checkErr.message);
     }
 
-    console.log('[PLAGIARISM] 17 plagiarism_check_update_finished', { checkId, submissionId, success: true });
-
     if (targetFeaturesData && submissionId) {
-      console.log('[PLAGIARISM] 18 features_insert_started', { checkId, submissionId, wordCount: targetFeaturesData?.word_count });
+      console.log('[PLAGIARISM] features_insert_started', { checkId, submissionId, wordCount: targetFeaturesData?.word_count });
 
-      // 2. Insert document features
       const { error: featErr } = await supabaseClient
         .from('submission_document_features')
         .insert({
           ...targetFeaturesData,
-          submission_id: submissionId
+          submission_id: submissionId,
+          finalized: true
         });
 
-      if (featErr) {
-        console.error('Error inserting submission_document_features:', featErr);
-      }
-
-      console.log('[PLAGIARISM] 19 features_insert_finished', { submissionId, success: !featErr });
+      if (featErr) console.error('Error inserting submission_document_features:', featErr);
+      else console.log('[PLAGIARISM] features_insert_finished', { submissionId, success: true });
     }
 
-    if (matchesToInsert && matchesToInsert.length > 0) {
-      // 3. Insert plagiarism matches
+    if (Array.isArray(matchesToInsert) && matchesToInsert.length > 0 && checkId) {
+      const validMatches = matchesToInsert.map(m => ({ ...m, plagiarism_check_id: checkId }));
       const { error: matchErr } = await supabaseClient
         .from('plagiarism_matches')
-        .insert(matchesToInsert);
+        .insert(validMatches);
 
-      if (matchErr) {
-        console.error('Error inserting plagiarism_matches:', matchErr);
-      }
+      if (matchErr) console.warn('Warning inserting plagiarism_matches:', matchErr.message);
     }
   } catch (err) {
     console.error('Error finalizing plagiarism check records:', err);

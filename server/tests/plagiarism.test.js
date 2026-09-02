@@ -3,7 +3,9 @@ import {
   validateDocumentFile,
   extractRawText,
   normalizeTextPipeline,
-  validateMinimumWordCount
+  validateMinimumWordCount,
+  computeContentHash,
+  computeFileHash
 } from '../services/textProcessor.js';
 import {
   generateChunkEmbedding,
@@ -28,7 +30,7 @@ async function buildChunksWithEmbeddings(normData) {
 
 async function runTests() {
   let passedCount = 0;
-  let totalTests = 15;
+  let totalTests = 16;
 
   const sampleAssignmentConfig = {
     plagiarism_enabled: true,
@@ -46,6 +48,8 @@ async function runTests() {
   `.repeat(2);
 
   const norm1 = normalizeTextPipeline(sampleDocText1);
+  const hash1 = computeContentHash(norm1.normalizedFullText);
+  const fileHash1 = computeFileHash(Buffer.from(sampleDocText1));
   const chunks1 = await buildChunksWithEmbeddings(norm1);
 
   // Candidate Corpus Feature
@@ -53,21 +57,50 @@ async function runTests() {
     submission_id: 'sub-student-A-1001',
     assignment_id: 'assign-cs-101',
     student_id: 'student-A-uuid',
+    content_hash: hash1,
+    file_hash: fileHash1,
+    finalized: true,
     normalized_text: norm1.normalizedFullText,
     tokens: norm1.tokens,
     chunks: chunks1
   };
 
+  // TEST 0: First Student Submitting (candidateCount === 0)
+  try {
+    const res = await runPlagiarismCheck({
+      targetNormalizedText: norm1.normalizedFullText,
+      targetTokens: norm1.tokens,
+      targetChunks: chunks1,
+      targetWordCount: norm1.wordCount,
+      targetStudentId: 'student-A-uuid',
+      targetContentHash: hash1,
+      targetFileHash: fileHash1,
+      assignmentId: 'assign-cs-101',
+      assignmentConfig: sampleAssignmentConfig,
+      candidateFeatures: []
+    });
+
+    assert.strictEqual(res.status, 'no_candidates');
+    assert.strictEqual(res.allowed, true);
+    assert.strictEqual(res.comparisonCount, 0);
+    assert.strictEqual(res.finalScore, 0);
+    console.log('✓ TEST 0 PASSED: First student correctly receives status="no_candidates", comparisonCount=0');
+    passedCount++;
+  } catch (err) {
+    console.error('❌ TEST 0 FAILED:', err.message);
+  }
+
   // TEST 1: Unique Document
   try {
     const uniqueText = `
-    Quantum computing is a rapidly-emerging technology that harnesses the laws of quantum mechanics to solve problems too complex for classical computers.
-    Today, IBM Quantum makes real quantum hardware available to thousands of developers. Our scientists lead the device revolution, advancing quantum computing for business and science.
-    Superconducting qubits use electrical circuits made of superconducting materials that exhibit zero electrical resistance at ultra-low cryogenic temperatures.
-    Quantum entanglement allows qubits to be correlated in ways that classical bits cannot achieve, enabling exponential parallelism in calculation models.
-    Quantum error correction is a crucial field of research focused on preserving coherence in fragile quantum states against environmental thermal noise.
+    Renewable energy systems such as solar and wind reduce dependence on fossil fuels and improve environmental sustainability.
+    Solar photovoltaic panels convert sunlight directly into electrical power using semiconductor materials that exhibit the photoelectric effect.
+    Wind turbines generate electricity by capturing kinetic energy from moving air masses using aerodynamic rotor blades.
+    Grid-scale battery storage technology enables smooth integration of intermittent renewable power into high-voltage electrical distribution networks.
+    Hydroelectric facilities utilize gravitational energy from elevated water reservoirs to rotate turbines connected to power generators.
     `.repeat(2);
     const normUnique = normalizeTextPipeline(uniqueText);
+    const hashUnique = computeContentHash(normUnique.normalizedFullText);
     const chunksUnique = await buildChunksWithEmbeddings(normUnique);
 
     const res = await runPlagiarismCheck({
@@ -76,6 +109,7 @@ async function runTests() {
       targetChunks: chunksUnique,
       targetWordCount: normUnique.wordCount,
       targetStudentId: 'student-B-uuid',
+      targetContentHash: hashUnique,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -89,7 +123,7 @@ async function runTests() {
     console.error('❌ TEST 1 FAILED:', err.message);
   }
 
-  // TEST 2: Exact Copy of another student's PDF
+  // TEST 2: Exact Copy of another student's document
   try {
     const res = await runPlagiarismCheck({
       targetNormalizedText: norm1.normalizedFullText,
@@ -97,14 +131,17 @@ async function runTests() {
       targetChunks: chunks1,
       targetWordCount: norm1.wordCount,
       targetStudentId: 'student-B-uuid',
+      targetContentHash: hash1,
+      targetFileHash: fileHash1,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
     });
 
     assert.strictEqual(res.status, 'blocked');
-    assert(res.finalScore >= 80, `Expected score >= 80%, got ${res.finalScore}%`);
-    console.log('✓ TEST 2 PASSED: Exact copy document correctly blocked ( Score:', res.finalScore, '% )');
+    assert.strictEqual(res.finalScore, 100);
+    assert.strictEqual(res.exactMatchFound, true);
+    console.log('✓ TEST 2 PASSED: Exact copy document correctly blocked with 100% exactMatchFound');
     passedCount++;
   } catch (err) {
     console.error('❌ TEST 2 FAILED:', err.message);
@@ -114,6 +151,7 @@ async function runTests() {
   try {
     const slightlyModifiedText = sampleDocText1.replace('statistical algorithms', 'probabilistic models').replace('training data', 'input dataset');
     const normMod = normalizeTextPipeline(slightlyModifiedText);
+    const hashMod = computeContentHash(normMod.normalizedFullText);
     const chunksMod = await buildChunksWithEmbeddings(normMod);
 
     const res = await runPlagiarismCheck({
@@ -122,6 +160,7 @@ async function runTests() {
       targetChunks: chunksMod,
       targetWordCount: normMod.wordCount,
       targetStudentId: 'student-B-uuid',
+      targetContentHash: hashMod,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -139,6 +178,7 @@ async function runTests() {
   try {
     const shuffledText = sampleDocText1.split('\n\n').reverse().join('\n\n');
     const normShuffled = normalizeTextPipeline(shuffledText);
+    const hashShuffled = computeContentHash(normShuffled.normalizedFullText);
     const chunksShuffled = await buildChunksWithEmbeddings(normShuffled);
 
     const res = await runPlagiarismCheck({
@@ -147,6 +187,7 @@ async function runTests() {
       targetChunks: chunksShuffled,
       targetWordCount: normShuffled.wordCount,
       targetStudentId: 'student-B-uuid',
+      targetContentHash: hashShuffled,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -167,6 +208,7 @@ async function runTests() {
     Unsupervised learning techniques examine raw features without target labels to discover clusters and structural patterns.
     `.repeat(3);
     const normPara = normalizeTextPipeline(paraphrasedText);
+    const hashPara = computeContentHash(normPara.normalizedFullText);
     const chunksPara = await buildChunksWithEmbeddings(normPara);
 
     const res = await runPlagiarismCheck({
@@ -175,6 +217,7 @@ async function runTests() {
       targetChunks: chunksPara,
       targetWordCount: normPara.wordCount,
       targetStudentId: 'student-B-uuid',
+      targetContentHash: hashPara,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -191,7 +234,7 @@ async function runTests() {
   try {
     const unrelatedDoc = {
       ...candidateCorpusFeature,
-      assignment_id: 'assign-math-999' // Different assignment
+      assignment_id: 'assign-math-999'
     };
 
     const res = await runPlagiarismCheck({
@@ -200,11 +243,13 @@ async function runTests() {
       targetChunks: chunks1,
       targetWordCount: norm1.wordCount,
       targetStudentId: 'student-B-uuid',
-      assignmentId: 'assign-cs-101', // Target assignment
+      targetContentHash: hash1,
+      assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [unrelatedDoc]
     });
 
+    assert.strictEqual(res.status, 'no_candidates');
     assert.strictEqual(res.finalScore, 0);
     console.log('✓ TEST 6 PASSED: Submissions for unrelated assignment correctly excluded ( Score:', res.finalScore, '% )');
     passedCount++;
@@ -226,7 +271,7 @@ async function runTests() {
   try {
     let thrown = false;
     try {
-      throw new Error('Unable to extract readable text from this document. Please upload a searchable PDF or DOCX.');
+      throw new Error('Unable to extract readable text from this document. Please upload a searchable PDF or DOCX file.');
     } catch (e) {
       thrown = true;
       assert(e.message.includes('searchable PDF'));
@@ -301,6 +346,7 @@ async function runTests() {
       targetChunks: chunks1,
       targetWordCount: norm1.wordCount,
       targetStudentId: 'student-C-uuid',
+      targetContentHash: hash1,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -311,6 +357,7 @@ async function runTests() {
       targetChunks: chunks1,
       targetWordCount: norm1.wordCount,
       targetStudentId: 'student-D-uuid',
+      targetContentHash: hash1,
       assignmentId: 'assign-cs-101',
       assignmentConfig: sampleAssignmentConfig,
       candidateFeatures: [candidateCorpusFeature]
@@ -356,6 +403,10 @@ async function runTests() {
   console.log('\n====================================================');
   console.log(`     VERIFICATION SUMMARY: ${passedCount} / ${totalTests} TESTS PASSED`);
   console.log('====================================================\n');
+
+  if (passedCount < totalTests) {
+    process.exit(1);
+  }
 }
 
 runTests();

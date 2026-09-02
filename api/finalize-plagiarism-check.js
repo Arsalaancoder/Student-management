@@ -2,18 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { finalizePlagiarismCheckRecords } from '../server/services/plagiarismService.js';
 
 function getServiceRoleKey() {
-  const verifiedKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzAyMDI4MiwiZXhwIjoyMTAyNTk2MjgyfQ.haIHjC1lL7OSjfKPd5rogCd2_bvF73n_s69DMqDPB1U";
   const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-  if (!envKey) return verifiedKey;
-  try {
-    const parts = envKey.split('.');
-    if (parts.length !== 3) return verifiedKey;
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-    if (payload.role === 'service_role' && payload.ref === 'lrnjkezowdhwnsysgzgt') {
-      return envKey;
-    }
-  } catch (e) {}
-  return verifiedKey;
+  if (!envKey) return null;
+  return envKey;
 }
 
 export default async function handler(req, res) {
@@ -38,14 +29,18 @@ export default async function handler(req, res) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
   const supabaseKey = getServiceRoleKey();
 
+  if (!supabaseKey) {
+    console.error('[Finalize API] Missing SUPABASE_SERVICE_ROLE_KEY');
+    return res.status(500).json({ success: false, error: 'Server configuration error: missing service key' });
+  }
+
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   const timeoutGuard = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Finalize operation timed out')), 12000)
+    setTimeout(() => reject(new Error('Finalize operation timed out')), 15000)
   );
 
   console.log('[PLAGIARISM] 15 finalize_handler_started', { checkId, submissionId });
-  console.log('[PLAGIARISM] 16 plagiarism_check_update_started', { checkId, submissionId });
 
   try {
     await Promise.race([
@@ -65,7 +60,7 @@ export default async function handler(req, res) {
             status: 'completed',
             report_data: {
               finalScore,
-              status,
+              status: status || 'passed',
               analyzed_at: new Date().toISOString()
             }
           }, { onConflict: 'submission_id' });
@@ -91,4 +86,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, error: err.message || 'Failed to finalize plagiarism check.' });
   }
 }
-

@@ -1,9 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { createRequire } from 'module';
 import mammoth from 'mammoth';
+import crypto from 'crypto';
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
+
+function getServiceRoleKey() {
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!envKey) return null;
+  return envKey;
+}
 
 function normalizeText(text) {
   if (!text || typeof text !== 'string') return '';
@@ -15,7 +22,7 @@ function tokenizeText(text) {
   return normalized ? normalized.split(' ').filter(word => word.length > 0) : [];
 }
 
-function generateNGrams(tokens, n = 3) {
+function generateNGrams(tokens, n = 4) {
   const ngrams = new Set();
   if (!tokens || tokens.length < n) return ngrams;
   for (let i = 0; i <= tokens.length - n; i++) {
@@ -26,9 +33,10 @@ function generateNGrams(tokens, n = 3) {
 
 function calculateJaccardSimilarity(setA, setB) {
   if (!setA || !setB || (setA.size === 0 && setB.size === 0)) return 0;
-  const intersection = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return union.size > 0 ? intersection.size / union.size : 0;
+  let intersectionCount = 0;
+  setA.forEach(x => { if (setB.has(x)) intersectionCount++; });
+  const unionSize = setA.size + setB.size - intersectionCount;
+  return unionSize > 0 ? intersectionCount / unionSize : 0;
 }
 
 function calculateCosineSimilarity(textA, textB) {
@@ -68,14 +76,11 @@ async function extractText(fileBuffer, fileName) {
       }
       return fileBuffer.toString('utf-8');
     } catch (pdfErr) {
-      console.error('PDF parsing error, attempting raw text fallback:', pdfErr);
       return fileBuffer.toString('utf-8');
     }
   } else if (ext === 'docx') {
     const result = await mammoth.extractRawText({ buffer: fileBuffer });
     return result.value || '';
-  } else if (ext === 'txt') {
-    return fileBuffer.toString('utf-8');
   } else {
     return fileBuffer.toString('utf-8');
   }
@@ -100,7 +105,11 @@ export default async function handler(req, res) {
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzAyMDI4MiwiZXhwIjoyMTAyNTk2MjgyfQ.haIHjC1lL7OSjfKPd5rogCd2_bvF73n_s69DMqDPB1U";
+  const supabaseKey = getServiceRoleKey();
+
+  if (!supabaseKey) {
+    return res.status(500).json({ error: 'Server configuration error: missing service key' });
+  }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -129,21 +138,41 @@ export default async function handler(req, res) {
     const rawTargetText = await extractText(targetBuffer, targetVersion.file_name);
     const normalizedTargetText = normalizeText(rawTargetText);
 
-    const targetTokens = tokenizeText(normalizedTargetText);
-    const target3Grams = generateNGrams(targetTokens, 3);
+    if (!normalizedTargetText || normalizedTargetText.split(/\s+/).length < 100) {
+      return res.json({
+        success: false,
+        status: 'failed',
+        message: 'Unable to extract enough readable text from this document.'
+      });
+    }
 
+    const targetContentHash = crypto.createHash('sha256').update(normalizedTargetText).digest('hex');
+    const targetTokens = tokenizeText(normalizedTargetText);
+    const target4Grams = generateNGrams(targetTokens, 4);
+
+    // FETCH CANDIDATES: SAME assignment, EXCLUDE target student's own submissions
     const { data: otherSubs, error: otherError } = await supabase
       .from('submissions')
       .select('*, submission_versions(*), profiles(full_name, student_id, email)')
       .eq('assignment_id', targetSub.assignment_id)
-      .neq('id', submissionId);
+      .neq('student_id', targetSub.student_id);
 
     if (otherError) throw otherError;
+
+    if (!otherSubs || otherSubs.length === 0) {
+      return res.json({
+        success: true,
+        similarity: 0,
+        status: 'no_candidates',
+        comparisonCount: 0,
+        matchesCount: 0,
+        message: 'Originality check passed. No previous submissions were available for comparison.'
+      });
+    }
 
     let maxSimilarity = 0;
     let highestLexical = 0;
     let highestSemantic = 0;
-    let isDuplicateSubmission = false;
     const matches = [];
 
     for (const otherSub of otherSubs) {
@@ -164,26 +193,38 @@ export default async function handler(req, res) {
 
         if (!normalizedOtherText) continue;
 
-        const isSameStudent = otherSub.student_id === targetSub.student_id;
-        const otherTokens = tokenizeText(normalizedOtherText);
-        const other3Grams = generateNGrams(otherTokens, 3);
-
-        const jaccardSim = calculateJaccardSimilarity(target3Grams, other3Grams);
-        const cosineSim = calculateCosineSimilarity(normalizedTargetText, normalizedOtherText);
-        const lexicalScore = Math.round((jaccardSim * 0.5 + cosineSim * 0.5) * 100);
-
-        // Layer 2 approximation
-        const n4A = generateNGrams(targetTokens, 4);
-        const n4B = generateNGrams(otherTokens, 4);
-        const semanticScore = Math.round(calculateJaccardSimilarity(n4A, n4B) * 100);
-
-        const combinedScore = Math.round((lexicalScore * 0.5) + (semanticScore * 0.5));
-
-        if (isSameStudent && combinedScore > 90) {
-          isDuplicateSubmission = true;
+        const candidateContentHash = crypto.createHash('sha256').update(normalizedOtherText).digest('hex');
+        if (targetContentHash === candidateContentHash) {
+          maxSimilarity = 100;
+          highestLexical = 100;
+          highestSemantic = 100;
+          const studentProfile = otherSub.profiles || {};
+          const studentDisplayName = studentProfile.full_name || studentProfile.email || `Student (${studentProfile.student_id || 'ID'})`;
+          matches.push({
+            matching_submission_id: otherSub.id,
+            student_name: studentDisplayName,
+            similarity_percentage: 100,
+            lexical_score: 100,
+            semantic_score: 100,
+            match_type: 'exact',
+            methods_used: ['Exact Content Hash (SHA-256)'],
+            target_text_preview: rawTargetText.substring(0, 600),
+            matched_text_preview: rawOtherText.substring(0, 600)
+          });
+          break;
         }
 
-        if (combinedScore > 0) {
+        const otherTokens = tokenizeText(normalizedOtherText);
+        const other4Grams = generateNGrams(otherTokens, 4);
+
+        const jaccardSim = calculateJaccardSimilarity(target4Grams, other4Grams);
+        const cosineSim = calculateCosineSimilarity(normalizedTargetText, normalizedOtherText);
+        const lexicalScore = Math.round((cosineSim * 0.40 + jaccardSim * 0.60) * 100);
+        const semanticScore = Math.round(jaccardSim * 100);
+
+        const combinedScore = Math.round((lexicalScore * 0.50) + (semanticScore * 0.50));
+
+        if (combinedScore > 20) {
           const studentProfile = otherSub.profiles || {};
           const studentDisplayName = studentProfile.full_name || studentProfile.email || `Student (${studentProfile.student_id || 'ID'})`;
 
@@ -194,17 +235,15 @@ export default async function handler(req, res) {
             lexical_score: lexicalScore,
             semantic_score: semanticScore,
             match_type: combinedScore >= 85 ? 'exact' : combinedScore >= 60 ? 'near_exact' : 'semantic',
-            methods_used: ['TF-IDF Cosine', 'N-gram Jaccard', 'Semantic Analysis'],
+            methods_used: ['TF-IDF Cosine', '4-Gram Jaccard'],
             target_text_preview: rawTargetText.substring(0, 600),
             matched_text_preview: rawOtherText.substring(0, 600)
           });
         }
 
-        if (!isSameStudent) {
-          if (combinedScore > maxSimilarity) maxSimilarity = combinedScore;
-          if (lexicalScore > highestLexical) highestLexical = lexicalScore;
-          if (semanticScore > highestSemantic) highestSemantic = semanticScore;
-        }
+        if (combinedScore > maxSimilarity) maxSimilarity = combinedScore;
+        if (lexicalScore > highestLexical) highestLexical = lexicalScore;
+        if (semanticScore > highestSemantic) highestSemantic = semanticScore;
 
       } catch (err) {
         console.error(`Error comparing against ${otherSub.id}:`, err);
@@ -213,18 +252,15 @@ export default async function handler(req, res) {
 
     matches.sort((a, b) => b.similarity_percentage - a.similarity_percentage);
 
-    let statusLevel = "low";
-    if (isDuplicateSubmission) statusLevel = "duplicate";
-    else if (maxSimilarity >= 70) statusLevel = "high";
-    else if (maxSimilarity >= 30) statusLevel = "review";
+    let statusLevel = "passed";
+    if (maxSimilarity >= 30) statusLevel = "blocked";
+    else if (maxSimilarity >= 20) statusLevel = "flagged";
 
     const reportData = {
       matches,
       lexical_score: highestLexical,
       semantic_score: highestSemantic,
-      methods_used: ["TF-IDF Cosine Similarity", "3-Gram Phrase Matching", "Semantic Analysis"],
-      semantic_similarity: `${highestSemantic}%`,
-      is_duplicate_submission: isDuplicateSubmission,
+      methods_used: ["TF-IDF Cosine Similarity", "4-Gram Phrase Matching"],
       status: statusLevel,
       analyzed_at: new Date().toISOString()
     };
@@ -241,19 +277,16 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString()
     }).eq('id', submissionId);
 
-    return res.json({ success: true, similarity: maxSimilarity, status: statusLevel, matchesCount: matches.length });
+    return res.json({
+      success: true,
+      similarity: maxSimilarity,
+      status: statusLevel,
+      comparisonCount: otherSubs.length,
+      matchesCount: matches.length
+    });
 
   } catch (error) {
     console.error('Error in check-similarity handler:', error);
-    try {
-      await supabase.from('plagiarism_reports').upsert({
-        submission_id: submissionId,
-        similarity_percentage: 0,
-        status: 'processing_failed',
-        report_data: { error: error.message || String(error), failed_at: new Date().toISOString() }
-      }, { onConflict: 'submission_id' });
-    } catch (e) {}
-
     return res.status(500).json({ error: error.message || 'Similarity check failed' });
   }
 }

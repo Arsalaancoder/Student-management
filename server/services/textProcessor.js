@@ -1,8 +1,25 @@
 import { createRequire } from 'module';
 import mammoth from 'mammoth';
+import crypto from 'crypto';
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
+
+/**
+ * Compute SHA256 file binary hash
+ */
+export function computeFileHash(buffer) {
+  if (!buffer || buffer.length === 0) return '';
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+/**
+ * Compute SHA256 content text hash
+ */
+export function computeContentHash(normalizedText) {
+  if (!normalizedText || typeof normalizedText !== 'string' || normalizedText.trim().length === 0) return '';
+  return crypto.createHash('sha256').update(normalizedText.trim()).digest('hex');
+}
 
 /**
  * Validate document file attributes before extraction.
@@ -187,7 +204,7 @@ export function validateMinimumWordCount(wordCount, minLimit = 100) {
   if (wordCount < minLimit) {
     return {
       valid: false,
-      error: `Your document contains insufficient readable content for plagiarism checking (${wordCount} words extracted, minimum required is ${minLimit} words).`
+      error: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
   return { valid: true };

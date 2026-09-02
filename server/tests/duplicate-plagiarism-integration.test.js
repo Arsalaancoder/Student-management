@@ -99,7 +99,7 @@ async function runDuplicateIntegrationTest() {
     });
 
     assert.strictEqual(resA.allowed, true);
-    assert.strictEqual(resA.status, 'passed');
+    assert.strictEqual(resA.status, 'no_candidates');
     assert.strictEqual(resA.finalScore, 0);
     console.log(`✓ Student A check result: allowed=${resA.allowed}, status=${resA.status}, similarity=${resA.finalScore}%`);
 

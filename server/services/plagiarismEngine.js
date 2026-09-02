@@ -1,21 +1,39 @@
 let pipeline = null;
 let featureExtractor = null;
 
-// Lazy load @xenova/transformers if available, else fallback to high-quality local feature embedding
+// Lazy load @xenova/transformers if available
 async function getFeatureExtractor() {
   if (featureExtractor !== null) return featureExtractor;
   try {
     const transformers = await import('@xenova/transformers');
     pipeline = transformers.pipeline;
-    // Load lightweight ONNX MiniLM model
     featureExtractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
     return featureExtractor;
   } catch (err) {
-    console.warn('Local transformer pipeline fallback enabled (ONNX model loading skipped or package initializing):', err.message);
     featureExtractor = false;
     return false;
   }
 }
+
+/**
+ * Common English stop words to exclude from naive feature hashing
+ */
+const STOP_WORDS = new Set([
+  'a','about','above','after','again','against','all','am','an','and','any','are','aren\'t','as','at',
+  'be','because','been','before','being','below','between','both','but','by','can','can\'t','cannot',
+  'could','couldn\'t','did','didn\'t','do','does','doesn\'t','doing','don\'t','down','during','each',
+  'few','for','from','further','had','hadn\'t','has','hasn\'t','have','haven\'t','having','he','he\'d',
+  'he\'ll','he\'s','her','here','here\'s','hers','herself','him','himself','his','how','how\'s','i',
+  'i\'d','i\'ll','i\'m','i\'ve','if','in','into','is','isn\'t','it','it\'s','its','itself','let\'s',
+  'me','more','most','mustn\'t','my','myself','no','nor','not','of','off','on','once','only','or',
+  'other','ought','our','ours','ourselves','out','over','own','same','shan\'t','she','she\'d','she\'ll',
+  'she\'s','should','shouldn\'t','so','some','such','than','that','that\'s','the','their','theirs',
+  'them','themselves','then','there','there\'s','these','they','they\'d','they\'ll','they\'re','they\'ve',
+  'this','those','through','to','too','under','until','up','very','was','wasn\'t','we','we\'d','we\'ll',
+  'we\'re','we\'ve','were','weren\'t','what','what\'s','when','when\'s','where','where\'s','which',
+  'while','who','who\'s','whom','why','why\'s','with','won\'t','would','wouldn\'t','you','you\'d',
+  'you\'ll','you\'re','you\'ve','your','yours','yourself','yourselves'
+]);
 
 /**
  * Generate 384-dimensional vector embedding for text chunk.
@@ -28,18 +46,21 @@ export async function generateChunkEmbedding(text, tokens) {
       const output = await extractor(text.substring(0, 1000), { pooling: 'mean', normalize: true });
       return Array.from(output.data);
     } catch (e) {
-      console.warn('Extractor inference warning, fallback to vector generation:', e.message);
+      // Fallback to local vector generation
     }
   }
 
   // Fallback high-dimensional dense vector representation (384 dimensions)
-  // Deterministic hashing of word n-grams into normalized unit vector
+  // Exclude stop words to avoid false baseline similarity between unrelated texts
   const dims = 384;
   const vec = new Float64Array(dims);
   if (!tokens || tokens.length === 0) return Array.from(vec);
 
-  for (let i = 0; i < tokens.length; i++) {
-    const word = tokens[i];
+  const filteredTokens = tokens.filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  if (filteredTokens.length === 0) return Array.from(vec);
+
+  for (let i = 0; i < filteredTokens.length; i++) {
+    const word = filteredTokens[i];
     let hash = 5381;
     for (let c = 0; c < word.length; c++) {
       hash = ((hash << 5) + hash) + word.charCodeAt(c);
@@ -47,9 +68,8 @@ export async function generateChunkEmbedding(text, tokens) {
     const idx = Math.abs(hash) % dims;
     vec[idx] += 1;
 
-    // 2-gram feature hashing
-    if (i < tokens.length - 1) {
-      const bigram = word + '_' + tokens[i + 1];
+    if (i < filteredTokens.length - 1) {
+      const bigram = word + '_' + filteredTokens[i + 1];
       let bHash = 5381;
       for (let c = 0; c < bigram.length; c++) {
         bHash = ((bHash << 5) + bHash) + bigram.charCodeAt(c);
@@ -59,7 +79,6 @@ export async function generateChunkEmbedding(text, tokens) {
     }
   }
 
-  // L2 Normalize vector
   let sumSq = 0;
   for (let i = 0; i < dims; i++) sumSq += vec[i] * vec[i];
   const mag = Math.sqrt(sumSq);
@@ -85,15 +104,13 @@ export function calculateVectorCosine(vecA, vecB) {
 }
 
 /**
- * ALGORITHM A: TF-IDF + Cosine Similarity
- * Computes exact TF-IDF vectors across the corpus of target doc + comparison docs for same assignment.
+ * ALGORITHM A: TF-IDF + Cosine Similarity (returns percentage 0..100)
  */
 export function computeTfidfCosineSimilarity(targetTokens, targetDocId, candidateDocs) {
   if (!targetTokens || targetTokens.length === 0 || !candidateDocs || candidateDocs.length === 0) {
     return { overallTfidfScore: 0, scoresMap: new Map() };
   }
 
-  // All documents in corpus
   const allDocs = [
     { id: targetDocId, tokens: targetTokens },
     ...candidateDocs.map(c => ({ id: c.submission_id || c.id, tokens: c.tokens || [] }))
@@ -103,7 +120,6 @@ export function computeTfidfCosineSimilarity(targetTokens, targetDocId, candidat
   const docFreqMap = new Map();
   const docTermFreqs = new Map();
 
-  // Compute Term Frequencies and Document Frequencies
   for (const doc of allDocs) {
     const tf = new Map();
     const uniqueTerms = new Set();
@@ -117,15 +133,12 @@ export function computeTfidfCosineSimilarity(targetTokens, targetDocId, candidat
     }
   }
 
-  // Compute IDF
   const idfMap = new Map();
   for (const [term, df] of docFreqMap.entries()) {
-    // Smoothed IDF formula
     const idf = Math.log(1 + (N / df));
     idfMap.set(term, idf);
   }
 
-  // Compute TF-IDF vectors
   function getVector(docId, docTokens) {
     const tf = docTermFreqs.get(docId) || new Map();
     const totalWords = docTokens.length || 1;
@@ -158,10 +171,8 @@ export function computeTfidfCosineSimilarity(targetTokens, targetDocId, candidat
       }
     }
     const candMag = Math.sqrt(candMagSq);
-    const cosine = (targetMag > 0 && candMag > 0) ? (dot / (targetMag * candMag)) : 0;
-    const scorePct = Math.round(Math.max(0, Math.min(100, cosine * 100)));
-
-    console.log(`[TFIDF DEBUG] candId: ${candId} | targetTokens: ${targetTokens.length} | candTokens: ${(cand.tokens||[]).length} | targetMag: ${targetMag} | candMag: ${candMag} | dot: ${dot} | cosine: ${cosine} | scorePct: ${scorePct}`);
+    const cosine = (targetMag > 0 && candMag > 0) ? Math.max(0, Math.min(1, dot / (targetMag * candMag))) : 0;
+    const scorePct = Math.round(cosine * 100);
 
     scoresMap.set(candId, scorePct);
     if (scorePct > maxTfidfScore) maxTfidfScore = scorePct;
@@ -171,7 +182,7 @@ export function computeTfidfCosineSimilarity(targetTokens, targetDocId, candidat
 }
 
 /**
- * ALGORITHM B: Word N-Gram Jaccard Similarity (4-grams default)
+ * ALGORITHM B: Word N-Gram Jaccard Similarity (4-grams default, percentage 0..100)
  */
 export function computeNGramSimilarity(targetTokens, candidateTokens, n = 4) {
   function getNGramSet(tokens) {
@@ -199,13 +210,13 @@ export function computeNGramSimilarity(targetTokens, candidateTokens, n = 4) {
 
   const unionSize = setA.size + setB.size - intersectionCount;
   const jaccard = unionSize > 0 ? (intersectionCount / unionSize) : 0;
-  const scorePct = Math.round(Math.max(0, Math.min(100, jaccard * 100)) * 10) / 10;
+  const scorePct = Math.round(Math.max(0, Math.min(1, jaccard)) * 100);
 
   return { score: scorePct, matchedNGrams };
 }
 
 /**
- * ALGORITHM C & PARAGRAPH OVERRIDE: Chunk / Paragraph Vector & Phrase Matching
+ * ALGORITHM C & PARAGRAPH OVERRIDE
  */
 export async function compareChunksSemanticAndNgram(targetChunks, candidateChunks, candidateDocId) {
   let maxSemanticChunkScore = 0;
@@ -222,12 +233,12 @@ export async function compareChunksSemanticAndNgram(targetChunks, candidateChunk
       const cTokens = cChunk.tokens || (cChunk.normalizedText || cChunk.rawText || '').toLowerCase().split(/\s+/).filter(Boolean);
       const cEmb = cChunk.embedding || [];
 
-      // Semantic Cosine between chunk embeddings
+      // Semantic Cosine between chunk embeddings (0..100)
       const semCos = calculateVectorCosine(tEmb, cEmb);
       const semPct = Math.round(semCos * 100);
 
-      // Paragraph n-gram Jaccard
-      const nGramRes = computeNGramSimilarity(tTokens, cTokens, 3);
+      // Paragraph 4-gram Jaccard (0..100)
+      const nGramRes = computeNGramSimilarity(tTokens, cTokens, 4);
       const nGramPct = nGramRes.score;
 
       const combinedChunkScore = Math.round((semPct * 0.5) + (nGramPct * 0.5));
@@ -237,7 +248,6 @@ export async function compareChunksSemanticAndNgram(targetChunks, candidateChunk
 
       const wordCount = tChunk.wordCount || tTokens.length;
 
-      // Strong chunk match criteria
       if ((combinedChunkScore >= 70 || semPct >= 80 || nGramPct >= 75) && wordCount >= 10) {
         chunkMatches.push({
           matched_submission_id: candidateDocId,
@@ -272,6 +282,10 @@ export async function runPlagiarismCheck({
   targetChunks,
   targetWordCount,
   targetStudentId,
+  targetContentHash,
+  targetFileHash,
+  targetSubmissionId,
+  targetCheckId,
   assignmentId,
   assignmentConfig,
   candidateFeatures // Array of pre-extracted document features from submission_document_features
@@ -282,7 +296,10 @@ export async function runPlagiarismCheck({
 
   if (!isEnabled) {
     return {
+      success: true,
+      allowed: true,
       status: 'passed',
+      comparisonCount: 0,
       finalScore: 0,
       tfidfScore: 0,
       ngramScore: 0,
@@ -291,11 +308,12 @@ export async function runPlagiarismCheck({
       highestMatchSubmissionId: null,
       highestMatchStudentId: null,
       matches: [],
-      candidateMatches: []
+      candidateMatches: [],
+      message: "Originality check disabled for this assignment."
     };
   }
 
-  // Filter candidates: SAME assignment, EXCLUDE target student's own submissions
+  // Filter candidates: SAME assignment, EXCLUDE target student's own submissions, EXCLUDE current check/submission
   const validCandidates = (candidateFeatures || []).map(c => {
     let tokens = c.tokens;
     if (!tokens || tokens.length === 0) {
@@ -312,17 +330,29 @@ export async function runPlagiarismCheck({
     return {
       ...c,
       submission_id: c.submission_id || c.id,
+      student_id: c.student_id,
+      assignment_id: c.assignment_id,
       tokens: tokens || []
     };
   }).filter(cand => {
     if (cand.assignment_id !== assignmentId) return false;
-    if (cand.student_id === targetStudentId) return false; // Exclude self
+    if (cand.student_id === targetStudentId) return false; // Exclude current student
+    if (targetSubmissionId && cand.submission_id === targetSubmissionId) return false;
+    if (targetCheckId && cand.plagiarism_check_id === targetCheckId) return false;
+    if (cand.finalized === false) return false; // Exclude unfinalized temporary candidate rows
     return true;
   });
 
-  if (validCandidates.length === 0) {
+  const candidateCount = validCandidates.length;
+
+  // Section O & Section A: FIRST STUDENT LOGIC
+  if (candidateCount === 0) {
     return {
-      status: 'passed',
+      success: true,
+      allowed: true,
+      status: 'no_candidates',
+      comparisonCount: 0,
+      candidateCount: 0,
       finalScore: 0,
       tfidfScore: 0,
       ngramScore: 0,
@@ -331,17 +361,68 @@ export async function runPlagiarismCheck({
       highestMatchSubmissionId: null,
       highestMatchStudentId: null,
       matches: [],
-      candidateMatches: []
+      candidateMatches: [],
+      message: 'Originality check passed. No previous submissions were available for comparison.'
     };
   }
 
-  // 1. TF-IDF Cosine Similarity across corpus
+  // Section E: EXACT DUPLICATE RULE
+  let exactMatchFound = false;
+  let exactMatchReason = null;
+  let exactMatchedCand = null;
+
+  for (const cand of validCandidates) {
+    if (targetContentHash && cand.content_hash && targetContentHash === cand.content_hash) {
+      exactMatchFound = true;
+      exactMatchReason = 'exact_content_duplicate';
+      exactMatchedCand = cand;
+      break;
+    }
+    if (targetFileHash && cand.file_hash && targetFileHash === cand.file_hash) {
+      exactMatchFound = true;
+      exactMatchReason = 'exact_file_duplicate';
+      exactMatchedCand = cand;
+      break;
+    }
+  }
+
+  if (exactMatchFound && exactMatchedCand) {
+    return {
+      success: true,
+      allowed: false,
+      status: 'blocked',
+      comparisonCount: candidateCount,
+      candidateCount: candidateCount,
+      finalScore: 100,
+      tfidfScore: 100,
+      ngramScore: 100,
+      semanticScore: 100,
+      wordCount: targetWordCount,
+      exactMatchFound: true,
+      decisionReason: exactMatchReason,
+      highestMatchSubmissionId: exactMatchedCand.submission_id,
+      highestMatchStudentId: exactMatchedCand.student_id,
+      matches: [],
+      candidateMatches: [{
+        matching_submission_id: exactMatchedCand.submission_id,
+        matching_student_id: exactMatchedCand.student_id,
+        similarity_percentage: 100,
+        tfidf_score: 100,
+        ngram_score: 100,
+        semantic_score: 100,
+        reason: exactMatchReason
+      }],
+      message: 'Submission Blocked. Similarity detected: 100%. Significant similarity (exact duplicate) was found with an existing submission. Please revise your work and submit again.'
+    };
+  }
+
+  // 1. TF-IDF Cosine Similarity across corpus (percentages 0..100)
   const tfidfResult = computeTfidfCosineSimilarity(targetTokens, 'TARGET_SUBMISSION', validCandidates);
 
-  let highestFinalScore = 0;
-  let highestTfidfScore = 0;
-  let highestNgramScore = 0;
-  let highestSemanticScore = 0;
+  let highestFinalScorePct = 0;
+  let highestTfidfPct = 0;
+  let highestNgramPct = 0;
+  let highestSemanticPct = 0;
   let highestMatchSubmissionId = null;
   let highestMatchStudentId = null;
   const allStoredMatches = [];
@@ -350,9 +431,9 @@ export async function runPlagiarismCheck({
   // 2. Compare target against each candidate document
   for (const candidate of validCandidates) {
     const candId = candidate.submission_id || candidate.id;
-    const candTfidfScore = tfidfResult.scoresMap.get(candId) || 0;
+    const candTfidfPct = tfidfResult.scoresMap.get(candId) || 0; // 0..100
 
-    // N-gram Similarity (4-grams)
+    // N-gram Similarity (4-grams, 0..100)
     const ngramRes = computeNGramSimilarity(targetTokens, candidate.tokens, 4);
 
     // Semantic & Paragraph Chunk Comparisons
@@ -370,80 +451,85 @@ export async function runPlagiarismCheck({
     }
 
     const chunkRes = await compareChunksSemanticAndNgram(targetChunks, candChunks, candId);
-    
-    const candNgramScore = Math.max(ngramRes.score, chunkRes.maxNGramChunkScore);
-    const candSemanticScore = chunkRes.maxSemanticChunkScore;
 
-    // Formula: (tfidf × 0.25) + (ngram × 0.35) + (semantic × 0.40)
-    let candidateFinalScore = (candTfidfScore * 0.25) + (candNgramScore * 0.35) + (candSemanticScore * 0.40);
+    const candNgramPct = Math.max(ngramRes.score, chunkRes.maxNGramChunkScore); // 0..100
+    const candSemanticPct = chunkRes.maxSemanticChunkScore; // 0..100
 
-    // High phrase or semantic overlap override
-    if (candNgramScore >= 60 || candSemanticScore >= 60) {
-      candidateFinalScore = Math.max(candidateFinalScore, candNgramScore, candSemanticScore);
-    }
+    // Weighted Formula on 0..100 scale:
+    // (tfidf * 0.25) + (ngram * 0.35) + (semantic * 0.40)
+    let candidateFinalRaw = (candTfidfPct * 0.25) + (candNgramPct * 0.35) + (candSemanticPct * 0.40);
 
-    // Paragraph-Level Copying Override:
-    if (chunkRes.strongMatches.length > 0) {
-      const topParagraphScore = chunkRes.strongMatches[0].similarity_score;
-      if (topParagraphScore >= 75) {
-        candidateFinalScore = Math.max(candidateFinalScore, topParagraphScore * 0.90);
+    // If paragraph copying override
+    if (Array.isArray(chunkRes.strongMatches) && chunkRes.strongMatches.length > 0) {
+      const topParagraphPct = chunkRes.strongMatches[0].similarity_score; // 0..100
+      if (topParagraphPct >= 75) {
+        candidateFinalRaw = Math.max(candidateFinalRaw, topParagraphPct * 0.90);
       }
     }
 
-    candidateFinalScore = Math.round(Math.max(0, Math.min(100, candidateFinalScore)) * 10) / 10;
+    let candidateFinalScorePct = Math.round(Math.max(0, Math.min(100, candidateFinalRaw)));
 
-    if (candidateFinalScore > 0) {
+    if (candidateFinalScorePct > 0) {
       candidateMatchesSummary.push({
         matching_submission_id: candidate.submission_id,
         matching_student_id: candidate.student_id,
-        similarity_percentage: candidateFinalScore,
-        tfidf_score: candTfidfScore,
-        ngram_score: candNgramScore,
-        semantic_score: candSemanticScore,
+        similarity_percentage: candidateFinalScorePct,
+        tfidf_score: candTfidfPct,
+        ngram_score: candNgramPct,
+        semantic_score: candSemanticPct,
         strong_matches_count: chunkRes.strongMatches.length,
         top_match_preview: chunkRes.strongMatches[0]?.source_text?.substring(0, 300) || targetNormalizedText.substring(0, 300)
       });
     }
 
-    if (chunkRes.strongMatches.length > 0) {
+    if (Array.isArray(chunkRes.strongMatches) && chunkRes.strongMatches.length > 0) {
       allStoredMatches.push(...chunkRes.strongMatches);
     }
 
-    if (candidateFinalScore > highestFinalScore) {
-      highestFinalScore = candidateFinalScore;
-      highestTfidfScore = candTfidfScore;
-      highestNgramScore = candNgramScore;
-      highestSemanticScore = candSemanticScore;
+    if (candidateFinalScorePct > highestFinalScorePct) {
+      highestFinalScorePct = candidateFinalScorePct;
+      highestTfidfPct = candTfidfPct;
+      highestNgramPct = candNgramPct;
+      highestSemanticPct = candSemanticPct;
       highestMatchSubmissionId = candidate.submission_id;
       highestMatchStudentId = candidate.student_id;
     }
   }
 
-  // Sort candidates by similarity
   candidateMatchesSummary.sort((a, b) => b.similarity_percentage - a.similarity_percentage);
   allStoredMatches.sort((a, b) => b.similarity_score - a.similarity_score);
 
   // Decision Threshold Logic:
-  // 0 - reviewThreshold %: PASS
-  // reviewThreshold - blockThreshold %: FLAG
-  // >= blockThreshold %: BLOCK
+  // 0 - reviewThreshold %: PASS ('passed')
+  // reviewThreshold - blockThreshold %: FLAG ('flagged')
+  // >= blockThreshold %: BLOCK ('blocked')
   let decisionStatus = 'passed';
-  if (highestFinalScore >= blockThreshold) {
+  let isAllowed = true;
+
+  if (highestFinalScorePct >= blockThreshold) {
     decisionStatus = 'blocked';
-  } else if (highestFinalScore >= reviewThreshold) {
+    isAllowed = false;
+  } else if (highestFinalScorePct >= reviewThreshold) {
     decisionStatus = 'flagged';
+    isAllowed = true;
   }
 
   return {
+    success: true,
+    allowed: isAllowed,
     status: decisionStatus,
-    finalScore: highestFinalScore,
-    tfidfScore: highestTfidfScore,
-    ngramScore: highestNgramScore,
-    semanticScore: highestSemanticScore,
+    comparisonCount: candidateCount,
+    candidateCount: candidateCount,
+    finalScore: highestFinalScorePct,
+    tfidfScore: highestTfidfPct,
+    ngramScore: highestNgramPct,
+    semanticScore: highestSemanticPct,
     wordCount: targetWordCount,
+    exactMatchFound: false,
+    decisionReason: decisionStatus,
     highestMatchSubmissionId,
     highestMatchStudentId,
-    matches: allStoredMatches.slice(0, 20), // Top 20 paragraph matches
+    matches: allStoredMatches.slice(0, 20),
     candidateMatches: candidateMatchesSummary
   };
 }

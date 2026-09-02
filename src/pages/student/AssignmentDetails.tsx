@@ -214,6 +214,11 @@ export default function AssignmentDetails() {
   }
 
   const validateAndSetFile = (file: File) => {
+    // Reset plagiarism state per selected file (Section H)
+    setPlagiarismBlockedResult(null)
+    setPlagiarismChecking(false)
+    setPlagiarismStep(0)
+
     // 15MB limit to optimize Supabase Storage bandwidth
     if (file.size > 15 * 1024 * 1024) {
       toast.error("File is too large. Maximum size is 15MB.")
@@ -401,13 +406,15 @@ export default function AssignmentDetails() {
       setSelectedFile(null)
       setSimilarityReport({
         submission_id: currentSubmissionId,
-        similarity_percentage: checkRes.finalScore,
-        status: 'completed'
+        similarity_percentage: checkRes.finalScore ?? 0,
+        status: checkRes.status || 'completed'
       })
 
       console.log('[PLAGIARISM] 22 UI_success')
 
-      if (checkRes.status === 'flagged') {
+      if (checkRes.status === 'no_candidates') {
+        toast.success("Originality check passed. No previous submissions were available for comparison.")
+      } else if (checkRes.status === 'flagged') {
         toast.warning(`Similarity detected: ${checkRes.finalScore}%. Your submission has been accepted but marked for professor review.`)
       } else {
         toast.success(`Originality Check Passed. Similarity: ${checkRes.finalScore}%. Assignment submitted successfully!`)
@@ -824,25 +831,29 @@ export default function AssignmentDetails() {
                 ) : (
                   <div className="space-y-4">
                     <div className="text-sm font-bold text-indigo-950">
-                      {similarityReport.similarity_percentage >= PLAGIARISM_CONFIG.HIGH_THRESHOLD
+                      {similarityReport.status === 'no_candidates'
+                        ? 'Originality check passed. No previous submissions were available for comparison.'
+                        : similarityReport.similarity_percentage >= PLAGIARISM_CONFIG.HIGH_THRESHOLD
                         ? PLAGIARISM_CONFIG.STUDENT_MESSAGES.HIGH
                         : similarityReport.similarity_percentage >= PLAGIARISM_CONFIG.REVIEW_THRESHOLD
                         ? PLAGIARISM_CONFIG.STUDENT_MESSAGES.REVIEW
                         : PLAGIARISM_CONFIG.STUDENT_MESSAGES.LOW}
                     </div>
 
-                    <div>
-                      <div className="flex justify-between text-xs font-bold text-indigo-900 mb-1">
-                        <span>Originality Index</span>
-                        <span>{Math.max(0, 100 - similarityReport.similarity_percentage)}%</span>
+                    {similarityReport.status !== 'no_candidates' && (
+                      <div>
+                        <div className="flex justify-between text-xs font-bold text-indigo-900 mb-1">
+                          <span>Originality Index</span>
+                          <span>{Math.max(0, 100 - similarityReport.similarity_percentage)}%</span>
+                        </div>
+                        <div className="h-2 w-full bg-indigo-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-indigo-600 rounded-full transition-all duration-500" 
+                            style={{ width: `${Math.max(0, 100 - similarityReport.similarity_percentage)}%` }} 
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-indigo-200 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-indigo-600 rounded-full transition-all duration-500" 
-                          style={{ width: `${Math.max(0, 100 - similarityReport.similarity_percentage)}%` }} 
-                        />
-                      </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </CardContent>
