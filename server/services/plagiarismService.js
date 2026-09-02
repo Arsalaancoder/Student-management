@@ -126,26 +126,33 @@ export async function executePreSubmissionPlagiarismCheck({
   }
 
   // 7. Retrieve Candidate Document Features for SAME assignment_id (EXCLUDING current student)
+  console.log('[PLAGIARISM] 08 candidate_query_started', { assignmentId, excludingStudent: studentId });
+
   const { data: candidates, error: candErr } = await supabaseClient
     .from('submission_document_features')
     .select('*')
     .eq('assignment_id', assignmentId)
-    .neq('student_id', studentId)
-    .eq('finalized', true);
+    .neq('student_id', studentId);
 
   if (candErr) {
-    console.error(`[PLAGIARISM ENGINE] Database error fetching candidate document features:`, candErr);
+    console.error('[PLAGIARISM] 08_error candidate_query_failed', {
+      stage: 'candidate_query',
+      code: candErr.code,
+      message: candErr.message,
+      details: candErr.details
+    });
     return {
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'DATABASE_ERROR',
-      message: 'Plagiarism checking is temporarily unavailable due to a database query error.'
+      errorType: 'DATABASE_QUERY_ERROR',
+      errorCode: 'DATABASE_QUERY_ERROR',
+      message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     };
   }
 
   const candidateCount = candidates ? candidates.length : 0;
-  console.log('[PLAGIARISM] 03 candidates_loaded', { candidateCount, excludingStudent: studentId });
+  console.log('[PLAGIARISM] 09 candidate_query_completed', { candidateCount, excludingStudent: studentId });
 
   // 8. Execute Plagiarism Engine
   const analysisResult = await runPlagiarismCheck({

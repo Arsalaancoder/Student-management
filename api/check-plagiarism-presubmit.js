@@ -17,25 +17,37 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
+    return res.status(405).json({ success: false, errorCode: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' });
   }
 
   const { fileBase64, fileName, mimeType, assignmentId, studentId } = req.body || {};
 
+  console.log('[PLAGIARISM] 01 request_received', { fileName, mimeType, assignmentId, studentId });
+
   if (!fileBase64 || !fileName || !assignmentId || !studentId) {
-    return res.status(400).json({ success: false, error: 'fileBase64, fileName, assignmentId, and studentId are required.' });
+    console.error('[PLAGIARISM] 01_error validation_failed_missing_fields', { hasBase64: !!fileBase64, fileName, assignmentId, studentId });
+    return res.status(400).json({
+      success: false,
+      allowed: false,
+      status: 'failed',
+      errorCode: 'VALIDATION_ERROR',
+      message: 'fileBase64, fileName, assignmentId, and studentId are required.'
+    });
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
   const supabaseKey = getServiceRoleKey();
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error('[PLAGIARISM API] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on server environment');
+    console.error('[PLAGIARISM] 01_error missing_server_env', {
+      hasSupabaseUrl: !!supabaseUrl,
+      hasServiceRoleKey: !!supabaseKey
+    });
     return res.status(500).json({
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'SERVER_CONFIGURATION_ERROR',
+      errorCode: 'SERVER_CONFIG_ERROR',
       message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     });
   }
@@ -53,16 +65,36 @@ export default async function handler(req, res) {
       supabaseClient: supabase
     });
 
-    console.log('[PLAGIARISM] 07 presubmit_response_sent', { httpStatus: 200, status: result.status });
+    console.log('[PLAGIARISM] 12 presubmit_completed', {
+      httpStatus: 200,
+      success: result.success,
+      allowed: result.allowed,
+      status: result.status,
+      finalScore: result.finalScore,
+      errorCode: result.errorType || result.errorCode
+    });
+
+    if (result.success === false || result.allowed === false) {
+      return res.status(result.status === 'blocked' ? 200 : 400).json({
+        errorCode: result.errorType || 'PLAGIARISM_CHECK_FAILED',
+        ...result
+      });
+    }
+
     return res.status(200).json(result);
   } catch (err) {
-    console.error('Error executing pre-submission plagiarism check:', err);
+    console.error('[PLAGIARISM] presubmit_uncaught_exception', {
+      stage: 'presubmit_handler',
+      errorMessage: err.message,
+      errorCode: err.code || 'SERVER_ERROR',
+      stack: err.stack
+    });
     return res.status(500).json({
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'SERVER_ERROR',
-      message: err.message || 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
+      errorCode: 'SERVER_ERROR',
+      message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     });
   }
 }

@@ -40,29 +40,64 @@ export async function checkPlagiarismPreSubmission(
     const contentType = res.headers.get("content-type") || ""
     if (res.ok) {
       if (contentType.includes("application/json")) {
-        return await res.json()
+        const data = await res.json()
+        console.log("[PLAGIARISM API] presubmit response success:", {
+          status: res.status,
+          contentType,
+          allowed: data?.allowed,
+          plagiarismStatus: data?.status,
+          finalScore: data?.finalScore
+        })
+        return data
       } else {
         const text = await res.text()
-        throw new Error(`Server returned non-JSON response (${res.status}): ${text.substring(0, 80)}`)
-      }
-    } else {
-      if (contentType.includes("application/json")) {
-        const errorData = await res.json().catch(() => ({}))
+        console.error("[PLAGIARISM API] non-JSON response:", { status: res.status, textPreview: text.substring(0, 100) })
         return {
           success: false,
           allowed: false,
           status: 'failed',
-          message: errorData.message || errorData.error || `Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.`
+          errorCode: 'NON_JSON_RESPONSE',
+          message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
         }
       }
-      throw new Error(`Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.`)
+    } else {
+      let errorData: any = {}
+      if (contentType.includes("application/json")) {
+        errorData = await res.json().catch(() => ({}))
+      }
+      console.error("[PLAGIARISM API] presubmit error response:", {
+        status: res.status,
+        contentType,
+        errorCode: errorData.errorCode || errorData.errorType || 'HTTP_ERROR',
+        message: errorData.message || errorData.error
+      })
+      return {
+        success: false,
+        allowed: false,
+        status: 'failed',
+        errorCode: errorData.errorCode || errorData.errorType || `HTTP_${res.status}`,
+        message: errorData.message || errorData.error || `Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.`
+      }
     }
   } catch (err: any) {
     clearTimeout(timeoutId)
+    console.error("[PLAGIARISM API] presubmit network exception:", { name: err.name, message: err.message })
     if (err.name === 'AbortError') {
-      throw new Error("Plagiarism check timed out. Please check your connection and try again.")
+      return {
+        success: false,
+        allowed: false,
+        status: 'failed',
+        errorCode: 'TIMEOUT',
+        message: "Plagiarism check timed out. Please check your connection and try again."
+      }
     }
-    throw err || new Error("Plagiarism checking service is temporarily unavailable. Please try again.")
+    return {
+      success: false,
+      allowed: false,
+      status: 'failed',
+      errorCode: 'NETWORK_ERROR',
+      message: err.message || "Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly."
+    }
   }
 }
 
