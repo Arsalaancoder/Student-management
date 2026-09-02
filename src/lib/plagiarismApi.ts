@@ -301,8 +301,7 @@ export async function checkPlagiarismPreSubmission(
 ): Promise<any> {
   const base64 = await fileToBase64(file)
   const endpoints = [
-    "/api/check-plagiarism-presubmit",
-    "http://localhost:3001/api/check-plagiarism-presubmit"
+    "/api/check-plagiarism-presubmit"
   ]
 
   let lastError: any = null
@@ -344,8 +343,7 @@ export async function finalizePlagiarismCheck(payload: {
   status?: string
 }): Promise<any> {
   const endpoints = [
-    "/api/finalize-plagiarism-check",
-    "http://localhost:3001/api/finalize-plagiarism-check"
+    "/api/finalize-plagiarism-check"
   ]
 
   for (const endpoint of endpoints) {
@@ -369,8 +367,7 @@ export async function finalizePlagiarismCheck(payload: {
 
 export async function triggerSimilarityCheck(submissionId: string): Promise<any> {
   const endpoints = [
-    "/api/check-similarity",
-    "http://localhost:3001/api/check-similarity"
+    "/api/check-similarity"
   ]
 
   for (const endpoint of endpoints) {
@@ -395,10 +392,8 @@ export async function triggerSimilarityCheck(submissionId: string): Promise<any>
 
 export async function triggerPlagiarismRetry(submissionId: string): Promise<any> {
   const endpoints = [
-    "/api/plagiarism/retry",
     "/api/plagiarism-retry",
-    "http://localhost:3001/api/plagiarism/retry",
-    "http://localhost:3001/api/check-similarity"
+    "/api/check-similarity"
   ]
 
   for (const endpoint of endpoints) {
@@ -420,4 +415,5 @@ export async function triggerPlagiarismRetry(submissionId: string): Promise<any>
   // Fallback to client-side processor
   return await processSimilarityClientFallback(submissionId)
 }
+
 
