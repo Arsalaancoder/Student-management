@@ -114,8 +114,8 @@ export async function executePreSubmissionPlagiarismCheck({
     contentHashPrefix: contentHash.substring(0, 8)
   });
 
-  // 5. Validate Minimum Word Count (Default >= 100 words)
-  const wordVal = validateMinimumWordCount(normData.wordCount, 100);
+  // 5. Validate Minimum Word Count (Default >= 30 words)
+  const wordVal = validateMinimumWordCount(normData.wordCount, 30);
   if (!wordVal.valid) {
     console.error('[PLAG ERROR]', {
       stage: '5 min word count',
@@ -128,7 +128,7 @@ export async function executePreSubmissionPlagiarismCheck({
       status: 'failed',
       errorType: 'INSUFFICIENT_CONTENT',
       errorCode: 'INSUFFICIENT_CONTENT',
-      message: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
+      message: wordVal.error
     };
   }
 

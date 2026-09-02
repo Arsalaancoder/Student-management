@@ -212,11 +212,11 @@ export function normalizeTextPipeline(rawText, templateText = null) {
 /**
  * Enforce minimum word count (>= 100 words)
  */
-export function validateMinimumWordCount(wordCount, minLimit = 100) {
+export function validateMinimumWordCount(wordCount, minLimit = 30) {
   if (wordCount < minLimit) {
     return {
       valid: false,
-      error: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
+      error: `Unable to extract enough readable text from this document (${wordCount} words extracted; minimum ${minLimit} words required). Please upload a searchable PDF or DOCX file.`
     };
   }
   return { valid: true };
