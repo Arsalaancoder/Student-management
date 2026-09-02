@@ -33,7 +33,7 @@ export default async function handler(req, res) {
     });
   }
 
-  console.log("[PLAG DEPLOYMENT]", "env-debug-v1");
+  console.log("[PLAG DEPLOYMENT]", "env-check-v2");
 
   const rawSupabaseUrl = process.env.SUPABASE_URL;
   const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -42,11 +42,18 @@ export default async function handler(req, res) {
   const serviceRoleKey = typeof rawServiceRoleKey === "string" ? rawServiceRoleKey.trim() : "";
 
   console.log("[PLAG ENV CHECK]", {
+    deployment: "env-check-v2",
     vercelEnv: process.env.VERCEL_ENV || "unknown",
-    hasSupabaseUrl: Boolean(supabaseUrl),
-    hasServiceRoleKey: Boolean(serviceRoleKey),
-    supabaseUrlLength: supabaseUrl ? supabaseUrl.length : 0,
-    serviceRoleKeyLength: serviceRoleKey ? serviceRoleKey.length : 0
+    hasSupabaseUrl:
+      typeof process.env.SUPABASE_URL === "string" &&
+      process.env.SUPABASE_URL.trim().length > 0,
+    hasServiceRoleKey:
+      typeof process.env.SUPABASE_SERVICE_ROLE_KEY === "string" &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 0,
+    supabaseUrlLength:
+      process.env.SUPABASE_URL?.trim().length || 0,
+    serviceRoleKeyLength:
+      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim().length || 0
   });
 
   if (!supabaseUrl || !serviceRoleKey) {
@@ -62,14 +69,42 @@ export default async function handler(req, res) {
       allowed: false,
       status: "failed",
       errorCode: "SERVER_CONFIG_ERROR",
+      diagnostics: {
+        vercelEnv: process.env.VERCEL_ENV || "unknown",
+        hasSupabaseUrl: Boolean(supabaseUrl),
+        hasServiceRoleKey: Boolean(serviceRoleKey)
+      },
       message:
         "Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly."
     });
   }
 
+  if (!supabaseUrl.startsWith("https://") || !supabaseUrl.includes(".supabase.co")) {
+    console.error("[PLAG ERROR] Invalid SUPABASE_URL format");
+    return res.status(500).json({
+      success: false,
+      allowed: false,
+      status: "failed",
+      errorCode: "INVALID_SUPABASE_URL",
+      message: "Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly."
+    });
+  }
+
   console.log("[PLAG] 2 env verified");
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  let supabase;
+  try {
+    supabase = createClient(supabaseUrl, serviceRoleKey);
+  } catch (initErr) {
+    console.error("[PLAG ERROR] Supabase client init failed:", initErr?.name, initErr?.message);
+    return res.status(500).json({
+      success: false,
+      allowed: false,
+      status: "failed",
+      errorCode: "SUPABASE_CLIENT_INIT_FAILED",
+      message: "Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly."
+    });
+  }
 
   try {
     const fileBuffer = Buffer.from(fileBase64, 'base64');
