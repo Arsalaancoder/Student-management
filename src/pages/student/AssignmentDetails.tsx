@@ -13,7 +13,7 @@ import AIPanel from "@/components/ai/AIPanel"
 import { invokeAIAssistant } from "@/lib/ai"
 import { createNotification } from "@/lib/notifications"
 import { isAssignmentTargetedToStudent } from "@/lib/targeting"
-import { triggerSimilarityCheck } from "@/lib/plagiarismApi"
+import { triggerSimilarityCheck, checkPlagiarismPreSubmission, finalizePlagiarismCheck } from "@/lib/plagiarismApi"
 import { PLAGIARISM_CONFIG } from "@/lib/plagiarismConfig"
 import { triggerSubmissionNotification } from "@/lib/fcm"
 
@@ -232,16 +232,55 @@ export default function AssignmentDetails() {
     setSelectedFile(file)
   }
 
+  const [plagiarismChecking, setPlagiarismChecking] = useState(false)
+  const [plagiarismStep, setPlagiarismStep] = useState(0)
+  const [plagiarismBlockedResult, setPlagiarismBlockedResult] = useState<any>(null)
+
   const handleUpload = async () => {
     if (!selectedFile || !profile || !assignment) return
 
     try {
       setUploading(true)
-      
+      setPlagiarismChecking(true)
+      setPlagiarismStep(1) // File validated
+      setPlagiarismBlockedResult(null)
+
+      // Step 1: Pre-Submission Plagiarism Check
+      await new Promise(r => setTimeout(r, 400))
+      setPlagiarismStep(2) // Text extracted
+
+      await new Promise(r => setTimeout(r, 400))
+      setPlagiarismStep(3) // Comparing with previous submissions
+
+      await new Promise(r => setTimeout(r, 400))
+      setPlagiarismStep(4) // Checking phrase similarity
+
+      await new Promise(r => setTimeout(r, 400))
+      setPlagiarismStep(5) // Checking semantic similarity
+
+      const checkRes = await checkPlagiarismPreSubmission(selectedFile, assignment.id, profile.id)
+
+      setPlagiarismStep(6) // Finalizing report
+      await new Promise(r => setTimeout(r, 300))
+
+      if (!checkRes.allowed || checkRes.status === 'blocked' || checkRes.status === 'failed' || checkRes.success === false) {
+        setPlagiarismChecking(false)
+        setUploading(false)
+        if (checkRes.status === 'failed' || checkRes.success === false) {
+          toast.error(checkRes.message || "Plagiarism check failed. Submission prevented.")
+          return
+        }
+        setPlagiarismBlockedResult({
+          similarity: checkRes.finalScore ?? checkRes.similarity,
+          message: checkRes.message || "Significant similarity was found with an existing submission. Please revise your work and submit again."
+        })
+        return
+      }
+
+      // Step 2: Upload File to Storage (Allowed PASS or FLAG)
       const fileExt = selectedFile.name.split('.').pop()
       const fileName = `${profile.id}/${assignment.id}/${Date.now()}.${fileExt}`
-      
-      // 1. Upload to Storage
+
       const { error: uploadError } = await supabase.storage
         .from('submissions')
         .upload(fileName, selectedFile, {
@@ -252,28 +291,28 @@ export default function AssignmentDetails() {
       if (uploadError) throw uploadError
 
       const filePath = fileName
-
       let currentSubmissionId = submission?.id
       let newVersionNumber = 1
+      const submissionStatus = checkRes.status === 'flagged' ? 'flagged' : 'submitted'
 
-      // 2. Create or Update Submission
+      // Step 3: Insert / Update Submission Record
       if (!currentSubmissionId) {
         const { data: newSub, error: subError } = await supabase
           .from("submissions")
           .insert({
             assignment_id: assignment.id,
             student_id: profile.id,
-            status: "submitted",
+            status: submissionStatus,
+            similarity_score: checkRes.finalScore,
             current_version: 1
           })
           .select()
           .single()
-          
+
         if (subError) throw subError
         currentSubmissionId = newSub.id
         setSubmission(newSub)
 
-        // Notification for Professor
         await createNotification(
           assignment.created_by,
           "New Submission",
@@ -281,7 +320,6 @@ export default function AssignmentDetails() {
           "new_submission"
         )
 
-        // Notification for Student
         await createNotification(
           profile.id,
           "Submission Confirmed",
@@ -293,16 +331,16 @@ export default function AssignmentDetails() {
         const { error: updateError } = await supabase
           .from("submissions")
           .update({
-            status: "submitted",
+            status: submissionStatus,
+            similarity_score: checkRes.finalScore,
             current_version: newVersionNumber,
             updated_at: new Date().toISOString()
           })
           .eq("id", currentSubmissionId)
-          
-        if (updateError) throw updateError
-        setSubmission({ ...submission, status: "submitted", current_version: newVersionNumber })
 
-        // Notification for Professor
+        if (updateError) throw updateError
+        setSubmission({ ...submission, status: submissionStatus, similarity_score: checkRes.finalScore, current_version: newVersionNumber })
+
         await createNotification(
           assignment.created_by,
           "Resubmission",
@@ -310,7 +348,6 @@ export default function AssignmentDetails() {
           "resubmission"
         )
 
-        // Notification for Student
         await createNotification(
           profile.id,
           "Resubmission Confirmed",
@@ -319,7 +356,7 @@ export default function AssignmentDetails() {
         )
       }
 
-      // 3. Create Submission Version
+      // Step 4: Create Submission Version
       const { data: newVersion, error: verError } = await supabase
         .from("submission_versions")
         .insert({
@@ -334,33 +371,40 @@ export default function AssignmentDetails() {
 
       if (verError) throw verError
 
-      setVersions([newVersion, ...versions])
-      setSelectedFile(null)
-      toast.success("Assignment submitted successfully!")
-
-      // Trigger FCM Push Notification to Professor (non-blocking)
-      triggerSubmissionNotification(currentSubmissionId).catch(err => {
-        console.warn("FCM submission push notification warning:", err)
+      // Step 5: Finalize Plagiarism Check Records
+      await finalizePlagiarismCheck({
+        checkId: checkRes.checkId,
+        submissionId: currentSubmissionId,
+        targetFeaturesData: checkRes.targetFeaturesData,
+        matchesToInsert: checkRes.matchesToInsert,
+        finalScore: checkRes.finalScore,
+        status: checkRes.status
       })
 
-      // Trigger similarity check in background (non-blocking)
-      triggerSimilarityCheck(currentSubmissionId)
-        .then((res) => {
-          if (res?.similarity !== undefined) {
-            setSimilarityReport({
-              submission_id: currentSubmissionId,
-              similarity_percentage: res.similarity,
-              status: 'completed'
-            })
-          }
-        })
-        .catch(err => console.error('Background similarity check exception:', err))
+      setVersions([newVersion, ...versions])
+      setSelectedFile(null)
+      setSimilarityReport({
+        submission_id: currentSubmissionId,
+        similarity_percentage: checkRes.finalScore,
+        status: 'completed'
+      })
+
+      if (checkRes.status === 'flagged') {
+        toast.warning(`Similarity detected: ${checkRes.finalScore}%. Your submission has been accepted but marked for professor review.`)
+      } else {
+        toast.success(`Originality Check Passed. Similarity: ${checkRes.finalScore}%. Assignment submitted successfully!`)
+      }
+
+      triggerSubmissionNotification(currentSubmissionId).catch(err => {
+        console.warn("FCM push warning:", err)
+      })
 
     } catch (error: any) {
       console.error("Error submitting assignment:", error)
       toast.error(error.message || "Failed to submit assignment")
     } finally {
       setUploading(false)
+      setPlagiarismChecking(false)
     }
   }
 
@@ -509,6 +553,72 @@ export default function AssignmentDetails() {
               
               {canSubmit ? (
                 <div className="space-y-6">
+
+                  {/* Plagiarism Progress Loading Modal */}
+                  {plagiarismChecking && (
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                      <Card className="w-full max-w-md border-none shadow-2xl rounded-[2rem] bg-white overflow-hidden p-8 space-y-6">
+                        <div className="flex flex-col items-center text-center">
+                          <div className="h-14 w-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-4">
+                            <Loader2 className="h-7 w-7 animate-spin" />
+                          </div>
+                          <h3 className="text-xl font-bold text-[#0B1E43]">Checking your assignment...</h3>
+                          <p className="text-sm text-slate-500 mt-1">Analyzing document text and calculating originality score.</p>
+                        </div>
+
+                        <div className="space-y-3 bg-slate-50 p-6 rounded-2xl border border-slate-100 text-sm">
+                          <div className="flex items-center gap-3 font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                            <span>File validated</span>
+                          </div>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 2 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 2 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
+                            <span>Text extracted</span>
+                          </div>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 3 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 3 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
+                            <span>Comparing with previous submissions</span>
+                          </div>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 4 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 4 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
+                            <span>Checking phrase similarity</span>
+                          </div>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 5 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 5 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
+                            <span>Checking semantic similarity</span>
+                          </div>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 6 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 6 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0 animate-pulse" />}
+                            <span>Finalizing plagiarism report</span>
+                          </div>
+                        </div>
+                      </Card>
+                    </div>
+                  )}
+
+                  {/* Plagiarism Blocked Result Alert Banner */}
+                  {plagiarismBlockedResult && (
+                    <div className="bg-red-50 border-2 border-red-200 rounded-3xl p-6 text-red-900 space-y-4 my-2 animate-in fade-in">
+                      <div className="flex items-start gap-4">
+                        <ShieldAlert className="h-8 w-8 text-red-600 shrink-0 mt-1" />
+                        <div className="space-y-2">
+                          <h3 className="text-xl font-bold text-red-900">Submission Blocked</h3>
+                          <p className="font-semibold text-red-700">
+                            Similarity detected: <span className="text-2xl font-black text-red-600">{plagiarismBlockedResult.similarity}%</span>
+                          </p>
+                          <p className="text-sm text-red-800 leading-relaxed bg-white/70 p-4 rounded-2xl border border-red-100">
+                            {plagiarismBlockedResult.message}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-3 pt-2">
+                        <Button variant="outline" className="border-red-200 text-red-800 hover:bg-red-100 rounded-full font-bold" onClick={() => setPlagiarismBlockedResult(null)}>
+                          Revise Document & Try Again
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Upload Zone */}
                   <div 
                     className={`relative border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center transition-all ${
@@ -541,8 +651,8 @@ export default function AssignmentDetails() {
                           <Button variant="outline" className="rounded-full border-indigo-200 text-indigo-700 hover:bg-indigo-50 gap-2" onClick={handleReviewWork} disabled={uploading || aiReviewLoading}>
                             <Sparkles className="h-4 w-4" /> Review My Work
                           </Button>
-                          <Button className="rounded-full px-8 bg-[#1E5EFF] hover:bg-blue-700" onClick={handleUpload} disabled={uploading}>
-                            {uploading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...</> : 'Submit Assignment'}
+                          <Button className="rounded-full px-8 bg-[#1E5EFF] hover:bg-blue-700 font-bold" onClick={handleUpload} disabled={uploading}>
+                            {uploading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Checking & Submitting...</> : 'Check & Submit'}
                           </Button>
                         </div>
                         <div className="w-full mt-6 text-left">

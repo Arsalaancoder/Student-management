@@ -55,65 +55,81 @@ export default function SimilarityReport() {
         if (subError) throw subError
         setSubmission(subData)
 
-        // 2. Fetch plagiarism report
+        // 2. Fetch plagiarism_checks record
+        const { data: checkData } = await supabase
+          .from("plagiarism_checks")
+          .select("*, plagiarism_matches(*)")
+          .eq("submission_id", id)
+          .maybeSingle()
+
+        // 3. Fetch legacy plagiarism report
         const { data: reportData } = await supabase
           .from("plagiarism_reports")
           .select("*")
           .eq("submission_id", id)
           .maybeSingle()
 
-        if (reportData) {
-          const repData = reportData.report_data as any
-          const rawMatches = repData?.matches || []
-
-          if (rawMatches.length > 0) {
-            const matchSubIds = rawMatches.map((m: any) => m.matching_submission_id).filter(Boolean)
-
-            if (matchSubIds.length > 0) {
-              const { data: matchedSubs } = await supabase
-                .from("submissions")
-                .select(`
-                  id,
-                  profiles:student_id (
-                    full_name,
-                    email,
-                    student_id,
-                    department,
-                    year,
-                    section,
-                    profile_photo_url
-                  )
-                `)
-                .in("id", matchSubIds)
-
-              const subProfileMap = new Map<string, any>()
-              matchedSubs?.forEach((ms: any) => {
-                subProfileMap.set(ms.id, ms.profiles)
-              })
-
-              // Enrich matches with profile info
-              repData.matches = rawMatches.map((m: any) => {
-                const mp = subProfileMap.get(m.matching_submission_id) || {}
-                const mName = mp.full_name || mp.email || (mp.student_id ? `Student (${mp.student_id})` : m.student_name || "Matching Student")
-                
-                return {
-                  ...m,
-                  student_name: mName,
-                  student_id: mp.student_id || "Not provided",
-                  department: mp.department || "Not provided",
-                  year: mp.year ? `${mp.year}${mp.year === 1 ? 'st' : mp.year === 2 ? 'nd' : mp.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
-                  section: mp.section ? `Section ${mp.section}` : "Not provided",
-                  profile_photo_url: mp.profile_photo_url || null
-                }
-              })
-            }
-          }
-
-          setReport(reportData)
-          if (repData?.matches && repData.matches.length > 0) {
-            setSelectedMatch(repData.matches[0])
+        const combinedReport = {
+          similarity_percentage: checkData?.final_score ?? reportData?.similarity_percentage ?? subData.similarity_score ?? 0,
+          status: checkData?.status ?? reportData?.status ?? 'completed',
+          checkData: checkData || null,
+          report_data: {
+            tfidf_score: checkData?.tfidf_score ?? 0,
+            ngram_score: checkData?.ngram_score ?? 0,
+            semantic_score: checkData?.semantic_score ?? 0,
+            ...(reportData?.report_data as any || {})
           }
         }
+
+        // Fetch matched student profiles for plagiarism matches
+        const matchesList = checkData?.plagiarism_matches || combinedReport.report_data?.matches || []
+        const matchedSubIds = matchesList.map((m: any) => m.matched_submission_id || m.matching_submission_id).filter(Boolean)
+
+        if (matchedSubIds.length > 0) {
+          const { data: matchedSubs } = await supabase
+            .from("submissions")
+            .select(`
+              id,
+              profiles:student_id (
+                id,
+                full_name,
+                email,
+                student_id,
+                department,
+                year,
+                section
+              )
+            `)
+            .in("id", matchedSubIds)
+
+          const subProfileMap = new Map<string, any>()
+          matchedSubs?.forEach((ms: any) => {
+            subProfileMap.set(ms.id, ms.profiles)
+          })
+
+          const enrichedMatches = matchesList.map((m: any) => {
+            const mSubId = m.matched_submission_id || m.matching_submission_id
+            const mp = subProfileMap.get(mSubId) || {}
+            const mName = mp.full_name || mp.email || (mp.student_id ? `Student (${mp.student_id})` : m.student_name || "Matching Student")
+            return {
+              ...m,
+              matching_submission_id: mSubId,
+              student_name: mName,
+              student_id: mp.student_id || "Not provided",
+              department: mp.department || "Not provided",
+              year: mp.year ? `${mp.year}${mp.year === 1 ? 'st' : mp.year === 2 ? 'nd' : mp.year === 3 ? 'rd' : 'th'} Year` : "Not provided",
+              section: mp.section ? `Section ${mp.section}` : "Not provided",
+              similarity_percentage: m.similarity_score ?? m.similarity_percentage ?? 0,
+              target_text_preview: m.source_text || m.target_text_preview || '',
+              matched_text_preview: m.matched_text || m.matched_text_preview || ''
+            }
+          })
+
+          combinedReport.report_data.matches = enrichedMatches
+          if (enrichedMatches.length > 0) setSelectedMatch(enrichedMatches[0])
+        }
+
+        setReport(combinedReport)
 
       } catch (error) {
         console.error("Error fetching similarity report:", error)
@@ -201,8 +217,9 @@ export default function SimilarityReport() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight text-[#0B1E43]">Academic Integrity Report</h1>
-            <div className="flex items-center gap-2 flex-wrap text-sm">
+            <h1 className="text-2xl font-bold tracking-tight text-[#0B1E43]">EduTrack Plagiarism Check</h1>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Internal Submission Similarity Report</div>
+            <div className="flex items-center gap-2 flex-wrap text-sm pt-1">
               <span className="font-bold text-[#0B1E43]">{targetStudentName}</span>
               {tp.student_id && (
                 <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-md">ID: {tp.student_id}</span>
@@ -220,23 +237,29 @@ export default function SimilarityReport() {
           </div>
         </div>
 
-        <div className="flex gap-3 shrink-0 items-center">
-          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
+        <div className="flex gap-3 shrink-0 items-center flex-wrap">
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center min-w-[75px]">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Overall</span>
-            <span className={`text-xl font-black ${similarity_percentage >= 70 ? 'text-red-600' : similarity_percentage >= 30 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            <span className={`text-xl font-black ${similarity_percentage >= 30 ? 'text-red-600' : similarity_percentage >= 20 ? 'text-amber-600' : 'text-emerald-600'}`}>
               {similarity_percentage}%
             </span>
           </div>
-          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Lexical</span>
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center min-w-[75px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">TF-IDF</span>
             <span className="text-xl font-black text-slate-700">
-              {report_data?.lexical_score ?? selectedMatch?.lexical_score ?? '—'}%
+              {report_data?.tfidf_score ?? '0'}%
             </span>
           </div>
-          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center">
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center min-w-[75px]">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">N-Gram</span>
+            <span className="text-xl font-black text-blue-600">
+              {report_data?.ngram_score ?? '0'}%
+            </span>
+          </div>
+          <div className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center min-w-[75px]">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Semantic</span>
             <span className="text-xl font-black text-indigo-600">
-              {report_data?.semantic_score ?? selectedMatch?.semantic_score ?? '—'}%
+              {report_data?.semantic_score ?? '0'}%
             </span>
           </div>
         </div>

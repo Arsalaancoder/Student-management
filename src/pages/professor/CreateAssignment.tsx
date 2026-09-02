@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Loader2, ArrowLeft, Save, AlertCircle, Plus, Trash2, CheckCircle2,
-  Upload, FileText, X
+  Upload, FileText, X, ShieldAlert
 } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -25,6 +25,8 @@ interface FormErrors {
   max_marks?: string
   max_credits?: string
   assignment_file?: string
+  plagiarism_review_threshold?: string
+  plagiarism_block_threshold?: string
 }
 
 const ALLOWED_FILE_TYPES = [
@@ -48,6 +50,12 @@ export default function CreateAssignment() {
   // Distribution State
   const [distributionType, setDistributionType] = useState<"all" | "specific">("all")
   const [selectedSections, setSelectedSections] = useState<string[]>([])
+
+  // Plagiarism Protection State
+  const [plagiarismEnabled, setPlagiarismEnabled] = useState(true)
+  const [plagiarismReviewThreshold, setPlagiarismReviewThreshold] = useState("20")
+  const [plagiarismBlockThreshold, setPlagiarismBlockThreshold] = useState("30")
+  const [templateText, setTemplateText] = useState("")
 
   // Rubric State
   const [useRubric, setUseRubric] = useState(false)
@@ -148,8 +156,16 @@ export default function CreateAssignment() {
       const marks = parseInt(formData.max_marks)
       if (isNaN(marks) || marks <= 0) errors.max_marks = "Maximum marks must be greater than 0."
     }
-    const credits = parseInt(formData.max_credits)
-    if (isNaN(credits) || credits < 0) errors.max_credits = "Credits must be 0 or more."
+    if (plagiarismEnabled) {
+      const rev = parseFloat(plagiarismReviewThreshold)
+      const blk = parseFloat(plagiarismBlockThreshold)
+      if (isNaN(rev) || rev < 0 || rev >= 100) {
+        errors.plagiarism_review_threshold = "Review threshold must be between 0% and 99%."
+      }
+      if (isNaN(blk) || blk <= (isNaN(rev) ? 0 : rev) || blk > 100) {
+        errors.plagiarism_block_threshold = "Block threshold must be greater than review threshold and <= 100%."
+      }
+    }
 
     setFormErrors(errors)
     return Object.keys(errors).length === 0
@@ -216,6 +232,10 @@ export default function CreateAssignment() {
           allowed_file_types: fileTypesArray.length > 0 ? fileTypesArray : null,
           rubric: useRubric ? rubric : null,
           assignment_file_path: assignmentFilePath,
+          plagiarism_enabled: plagiarismEnabled,
+          plagiarism_review_threshold: parseFloat(plagiarismReviewThreshold) || 20,
+          plagiarism_block_threshold: parseFloat(plagiarismBlockThreshold) || 30,
+          template_text: templateText.trim() || null,
           created_by: profile.id,
         }])
         .select()
@@ -530,6 +550,74 @@ export default function CreateAssignment() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* PLAGIARISM PROTECTION */}
+              <div className="md:col-span-2 pt-6 border-t border-muted/50 space-y-4">
+                <div className="bg-indigo-50/60 p-6 rounded-2xl border border-indigo-100 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-2">
+                        <ShieldAlert className="h-5 w-5 text-indigo-600" />
+                        Plagiarism Protection
+                      </h3>
+                      <p className="text-xs text-indigo-700 mt-1">
+                        EduTrack compares the submission against other students' submissions for this assignment.
+                      </p>
+                    </div>
+                    <div
+                      className={`w-12 h-6 rounded-full cursor-pointer relative transition-colors ${plagiarismEnabled ? "bg-indigo-600" : "bg-slate-300"}`}
+                      onClick={() => setPlagiarismEnabled(!plagiarismEnabled)}
+                      role="switch" aria-checked={plagiarismEnabled} tabIndex={0}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm ${plagiarismEnabled ? "left-7" : "left-1"}`} />
+                    </div>
+                  </div>
+
+                  {plagiarismEnabled && (
+                    <div className="space-y-6 animate-in fade-in">
+                      <div className="grid gap-6 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <label className="text-sm font-bold text-indigo-950">Review Threshold (%)</label>
+                          <Input
+                            type="number" min="0" max="99"
+                            value={plagiarismReviewThreshold}
+                            onChange={e => setPlagiarismReviewThreshold(e.target.value)}
+                            className="bg-white border-indigo-200 h-12 rounded-2xl text-center font-bold text-slate-900"
+                          />
+                          <p className="text-xs text-indigo-700">Submissions between review and block threshold are accepted but marked for professor review.</p>
+                          {formErrors.plagiarism_review_threshold && (
+                            <p className="text-xs text-red-500 font-bold">{formErrors.plagiarism_review_threshold}</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-bold text-indigo-950">Block Threshold (%)</label>
+                          <Input
+                            type="number" min="1" max="100"
+                            value={plagiarismBlockThreshold}
+                            onChange={e => setPlagiarismBlockThreshold(e.target.value)}
+                            className="bg-white border-indigo-200 h-12 rounded-2xl text-center font-bold text-slate-900"
+                          />
+                          <p className="text-xs text-indigo-700">Submissions meeting or exceeding this threshold are blocked from submission.</p>
+                          {formErrors.plagiarism_block_threshold && (
+                            <p className="text-xs text-red-500 font-bold">{formErrors.plagiarism_block_threshold}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-indigo-950">Assignment Question Paper / Template Text (Optional)</label>
+                        <textarea
+                          placeholder="Paste your question sheet or starter template text here. Identical template content will be excluded from student plagiarism scoring."
+                          value={templateText}
+                          onChange={e => setTemplateText(e.target.value)}
+                          className="bg-white border border-indigo-200 rounded-2xl min-h-[90px] w-full p-4 text-sm text-slate-900 resize-y"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* ASSIGNMENT DISTRIBUTION */}

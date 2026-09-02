@@ -281,6 +281,92 @@ export async function processSimilarityClientFallback(submissionId: string): Pro
   }
 }
 
+export async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const res = reader.result as string
+      const base64 = res.includes(",") ? res.split(",")[1] : res
+      resolve(base64)
+    }
+    reader.onerror = (err) => reject(err)
+    reader.readAsDataURL(file)
+  })
+}
+
+export async function checkPlagiarismPreSubmission(
+  file: File,
+  assignmentId: string,
+  studentId: string
+): Promise<any> {
+  const base64 = await fileToBase64(file)
+  const endpoints = [
+    "/api/check-plagiarism-presubmit",
+    "http://localhost:3001/api/check-plagiarism-presubmit"
+  ]
+
+  let lastError: any = null
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileBase64: base64,
+          fileName: file.name,
+          mimeType: file.type,
+          assignmentId,
+          studentId
+        })
+      })
+
+      if (res.ok) {
+        return await res.json()
+      } else {
+        const errorData = await res.json().catch(() => ({}))
+        lastError = new Error(errorData.message || errorData.error || `HTTP error ${res.status}`)
+      }
+    } catch (err) {
+      lastError = err
+    }
+  }
+
+  throw lastError || new Error("Plagiarism checking service is temporarily unavailable. Please try again.")
+}
+
+export async function finalizePlagiarismCheck(payload: {
+  checkId?: string
+  submissionId: string
+  targetFeaturesData?: any
+  matchesToInsert?: any[]
+  finalScore?: number
+  status?: string
+}): Promise<any> {
+  const endpoints = [
+    "/api/finalize-plagiarism-check",
+    "http://localhost:3001/api/finalize-plagiarism-check"
+  ]
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        return await res.json()
+      }
+    } catch (err) {
+      // Continue to next endpoint
+    }
+  }
+
+  return { success: false }
+}
+
 export async function triggerSimilarityCheck(submissionId: string): Promise<any> {
   const endpoints = [
     "/api/check-similarity",
@@ -334,3 +420,4 @@ export async function triggerPlagiarismRetry(submissionId: string): Promise<any>
   // Fallback to client-side processor
   return await processSimilarityClientFallback(submissionId)
 }
+
