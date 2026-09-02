@@ -296,7 +296,9 @@ export default function AssignmentDetails() {
       const filePath = fileName
       let currentSubmissionId = submission?.id
       let newVersionNumber = 1
-      const submissionStatus = checkRes.status === 'flagged' ? 'flagged' : 'submitted'
+      const submissionStatus = 'submitted'
+
+      console.log('[SUBMISSION] Inserting submission status:', { submissionStatus, plagiarismStatus: checkRes?.status })
 
       // Step 3: Insert / Update Submission Record
       console.log('[PLAGIARISM] 12 submission_insert_started', { assignmentId: assignment.id, studentId: profile.id })

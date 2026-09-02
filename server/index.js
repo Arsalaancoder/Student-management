@@ -378,7 +378,7 @@ app.post('/api/finalize-plagiarism-check', async (req, res) => {
 
       await supabase.from('submissions').update({
         similarity_score: finalScore,
-        status: status === 'flagged' ? 'flagged' : 'submitted',
+        status: 'submitted',
         updated_at: new Date().toISOString()
       }).eq('id', submissionId);
     }

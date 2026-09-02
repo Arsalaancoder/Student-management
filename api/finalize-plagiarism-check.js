@@ -65,11 +65,11 @@ export default async function handler(req, res) {
             }
           }, { onConflict: 'submission_id' });
 
-          if (rptError) console.warn('[Finalize] Report upsert warning:', rptError.message);
+          console.log('[SUBMISSION] Finalizing submission status:', { submissionId, submissionStatus: 'submitted', plagiarismStatus: status });
 
           const { error: subUpdateError } = await supabase.from('submissions').update({
             similarity_score: finalScore,
-            status: status === 'flagged' ? 'flagged' : 'submitted',
+            status: 'submitted',
             updated_at: new Date().toISOString()
           }).eq('id', submissionId);
 
