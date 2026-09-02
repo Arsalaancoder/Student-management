@@ -1,6 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { finalizePlagiarismCheckRecords } from '../server/services/plagiarismService.js';
 
+function getServiceRoleKey() {
+  const verifiedKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzAyMDI4MiwiZXhwIjoyMTAyNTk2MjgyfQ.haIHjC1lL7OSjfKPd5rogCd2_bvF73n_s69DMqDPB1U";
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  if (!envKey) return verifiedKey;
+  try {
+    const parts = envKey.split('.');
+    if (parts.length !== 3) return verifiedKey;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+    if (payload.role === 'service_role' && payload.ref === 'lrnjkezowdhwnsysgzgt') {
+      return envKey;
+    }
+  } catch (e) {}
+  return verifiedKey;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -21,7 +36,7 @@ export default async function handler(req, res) {
   }
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxybmprZXpvd2Rod25zeXNnemd0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzAyMDI4MiwiZXhwIjoyMTAyNTk2MjgyfQ.haIHjC1lL7OSjfKPd5rogCd2_bvF73n_s69DMqDPB1U";
+  const supabaseKey = getServiceRoleKey();
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
