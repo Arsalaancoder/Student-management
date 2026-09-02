@@ -3,7 +3,16 @@ import mammoth from 'mammoth';
 import crypto from 'crypto';
 
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+let pdfParse;
+try {
+  pdfParse = require('pdf-parse/lib/pdf-parse.js');
+} catch (e) {
+  try {
+    pdfParse = require('pdf-parse');
+  } catch (err) {
+    console.error('[TEXT PROCESSOR] Failed to load pdf-parse:', err);
+  }
+}
 
 /**
  * Compute SHA256 file binary hash

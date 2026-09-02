@@ -15,8 +15,12 @@ import {
 } from './utils/textNormalizer.js';
 
 // Use createRequire to import CJS module (pdf-parse) in an ESM context
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+let pdfParse;
+try {
+  pdfParse = require('pdf-parse/lib/pdf-parse.js');
+} catch (e) {
+  try { pdfParse = require('pdf-parse'); } catch (err) {}
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
