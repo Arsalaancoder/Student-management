@@ -46,10 +46,16 @@ export async function checkPlagiarismPreSubmission(
         throw new Error(`Server returned non-JSON response (${res.status}): ${text.substring(0, 80)}`)
       }
     } else {
-      const errorData = contentType.includes("application/json")
-        ? await res.json().catch(() => ({}))
-        : {}
-      throw new Error(errorData.message || errorData.error || `HTTP error ${res.status}`)
+      if (contentType.includes("application/json")) {
+        const errorData = await res.json().catch(() => ({}))
+        return {
+          success: false,
+          allowed: false,
+          status: 'failed',
+          message: errorData.message || errorData.error || `Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.`
+        }
+      }
+      throw new Error(`Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.`)
     }
   } catch (err: any) {
     clearTimeout(timeoutId)

@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { finalizePlagiarismCheckRecords } from '../server/services/plagiarismService.js';
 
 function getServiceRoleKey() {
-  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!envKey) return null;
   return envKey;
 }
@@ -26,12 +26,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'submissionId is required.' });
   }
 
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
   const supabaseKey = getServiceRoleKey();
 
-  if (!supabaseKey) {
-    console.error('[Finalize API] Missing SUPABASE_SERVICE_ROLE_KEY');
-    return res.status(500).json({ success: false, error: 'Server configuration error: missing service key' });
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[Finalize API] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on server environment');
+    return res.status(500).json({ success: false, error: 'Originality service is temporarily unavailable. Please try again shortly.' });
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);

@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { executePreSubmissionPlagiarismCheck } from '../server/services/plagiarismService.js';
 
 function getServiceRoleKey() {
-  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!envKey) return null;
   return envKey;
 }
@@ -26,15 +26,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'fileBase64, fileName, assignmentId, and studentId are required.' });
   }
 
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
   const supabaseKey = getServiceRoleKey();
 
-  if (!supabaseKey) {
-    console.error('[PLAGIARISM API] Missing SUPABASE_SERVICE_ROLE_KEY on server');
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[PLAGIARISM API] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on server environment');
     return res.status(500).json({
       success: false,
+      allowed: false,
+      status: 'failed',
       errorType: 'SERVER_CONFIGURATION_ERROR',
-      message: 'Plagiarism checking service is temporarily unavailable due to server configuration.'
+      message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     });
   }
 
@@ -57,8 +59,10 @@ export default async function handler(req, res) {
     console.error('Error executing pre-submission plagiarism check:', err);
     return res.status(500).json({
       success: false,
+      allowed: false,
+      status: 'failed',
       errorType: 'SERVER_ERROR',
-      message: err.message || 'Plagiarism checking is temporarily unavailable. Please try again.'
+      message: err.message || 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     });
   }
 }
