@@ -6,12 +6,6 @@ import crypto from 'crypto';
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
 
-function getServiceRoleKey() {
-  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!envKey) return null;
-  return envKey;
-}
-
 function normalizeText(text) {
   if (!text || typeof text !== 'string') return '';
   return text.toLowerCase().replace(/[\r\t\f\v]/g, ' ').replace(/\n+/g, ' ').replace(/[^\w\s]/gi, ' ').replace(/\s+/g, ' ').trim();
@@ -104,15 +98,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'submissionId is required' });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://lrnjkezowdhwnsysgzgt.supabase.co";
-  const supabaseKey = getServiceRoleKey();
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!supabaseUrl || !supabaseKey) {
-    console.error('[Check Similarity API] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on server environment');
-    return res.status(500).json({ error: 'Originality service is temporarily unavailable. Please try again shortly.' });
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error('[PLAG ERROR]', {
+      stage: '2 env verified',
+      errorCode: 'SERVER_CONFIG_ERROR',
+      missingSupabaseUrl: !supabaseUrl,
+      missingServiceRoleKey: !serviceRoleKey,
+      vercelEnv: process.env.VERCEL_ENV
+    });
+    return res.status(500).json({ success: false, errorCode: 'SERVER_CONFIG_ERROR', error: 'Originality service is temporarily unavailable. Please try again shortly.' });
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   try {
     const { data: targetSub, error: targetError } = await supabase
