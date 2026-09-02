@@ -33,13 +33,20 @@ export default async function handler(req, res) {
     });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log("[PLAG DEPLOYMENT]", "env-debug-v1");
+
+  const rawSupabaseUrl = process.env.SUPABASE_URL;
+  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const supabaseUrl = typeof rawSupabaseUrl === "string" ? rawSupabaseUrl.trim() : "";
+  const serviceRoleKey = typeof rawServiceRoleKey === "string" ? rawServiceRoleKey.trim() : "";
 
   console.log("[PLAG ENV CHECK]", {
     vercelEnv: process.env.VERCEL_ENV || "unknown",
     hasSupabaseUrl: Boolean(supabaseUrl),
-    hasServiceRoleKey: Boolean(serviceRoleKey)
+    hasServiceRoleKey: Boolean(serviceRoleKey),
+    supabaseUrlLength: supabaseUrl ? supabaseUrl.length : 0,
+    serviceRoleKeyLength: serviceRoleKey ? serviceRoleKey.length : 0
   });
 
   if (!supabaseUrl || !serviceRoleKey) {
@@ -60,11 +67,7 @@ export default async function handler(req, res) {
     });
   }
 
-  console.log("[PLAG] 2 env verified", {
-    vercelEnv: process.env.VERCEL_ENV || "unknown",
-    hasSupabaseUrl: true,
-    hasServiceRoleKey: true
-  });
+  console.log("[PLAG] 2 env verified");
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 

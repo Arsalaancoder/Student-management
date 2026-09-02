@@ -27,13 +27,20 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, errorCode: 'VALIDATION_ERROR', error: 'submissionId is required.' });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  console.log("[PLAG DEPLOYMENT FINALIZE]", "env-debug-v1");
+
+  const rawSupabaseUrl = process.env.SUPABASE_URL;
+  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const supabaseUrl = typeof rawSupabaseUrl === "string" ? rawSupabaseUrl.trim() : "";
+  const serviceRoleKey = typeof rawServiceRoleKey === "string" ? rawServiceRoleKey.trim() : "";
 
   console.log("[PLAG ENV CHECK FINALIZE]", {
     vercelEnv: process.env.VERCEL_ENV || "unknown",
     hasSupabaseUrl: Boolean(supabaseUrl),
-    hasServiceRoleKey: Boolean(serviceRoleKey)
+    hasServiceRoleKey: Boolean(serviceRoleKey),
+    supabaseUrlLength: supabaseUrl ? supabaseUrl.length : 0,
+    serviceRoleKeyLength: serviceRoleKey ? serviceRoleKey.length : 0
   });
 
   if (!supabaseUrl || !serviceRoleKey) {
