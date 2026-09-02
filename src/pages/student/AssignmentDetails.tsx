@@ -251,33 +251,38 @@ export default function AssignmentDetails() {
       setPlagiarismBlockedResult(null)
 
       // Step 1: Pre-Submission Plagiarism Check (02-07 execute on server)
+      console.log('[UI SUBMIT] presubmit start', { assignmentId: assignment.id, studentId: profile.id, fileName: selectedFile.name, fileSize: selectedFile.size })
+
       const checkRes = await checkPlagiarismPreSubmission(selectedFile, assignment.id, profile.id)
 
-      console.log('[PLAGIARISM] 08 presubmit_response_received', { httpStatus: 200 })
-      console.log('[PLAGIARISM] 09 decision_received', { allowed: checkRes?.allowed, status: checkRes?.status, score: checkRes?.finalScore })
+      console.log('[UI SUBMIT] presubmit response:', { allowed: checkRes?.allowed, status: checkRes?.status, score: checkRes?.finalScore, success: checkRes?.success })
 
-      if (!checkRes.allowed || checkRes.status === 'blocked' || checkRes.status === 'failed' || checkRes.success === false) {
+      const isAllowedStatus = checkRes?.allowed === true && (checkRes?.status === 'passed' || checkRes?.status === 'no_candidates' || checkRes?.status === 'flagged');
+
+      if (!isAllowedStatus || checkRes?.status === 'blocked' || checkRes?.status === 'failed' || checkRes?.success === false) {
         setPlagiarismChecking(false)
         setUploading(false)
-        if (checkRes.status === 'failed' || checkRes.success === false) {
-          toast.error(checkRes.message || "Plagiarism check failed. Submission prevented.")
+        if (checkRes?.status === 'failed' || checkRes?.success === false) {
+          console.error('[UI SUBMIT] PRESUBMIT_FAILED', { errorCode: checkRes?.errorCode, message: checkRes?.message })
+          toast.error(checkRes?.message || "Plagiarism check failed. Submission prevented.")
           return
         }
         setPlagiarismBlockedResult({
-          similarity: checkRes.finalScore ?? checkRes.similarity,
-          message: checkRes.message || "Significant similarity was found with an existing submission. Please revise your work and submit again."
+          similarity: checkRes?.finalScore ?? checkRes?.similarity ?? 0,
+          message: checkRes?.message || "Significant similarity was found with an existing submission. Please revise your work and submit again."
         })
         return
       }
+
+      console.log('[UI SUBMIT] presubmit success')
 
       // Pre-check passed: set UI progress to similarity complete (Step 5)
       setPlagiarismStep(5)
 
       // Step 2: Upload File to Storage (Allowed PASS or FLAG)
+      console.log('[UI SUBMIT] file upload start')
       const fileExt = selectedFile.name.split('.').pop()
       const fileName = `${profile.id}/${assignment.id}/${Date.now()}.${fileExt}`
-
-      console.log('[PLAGIARISM] 10 submission_upload_started', { bucket: 'submissions', filePath: fileName, fileSize: selectedFile.size })
 
       const { error: uploadError } = await supabase.storage
         .from('submissions')
@@ -287,21 +292,19 @@ export default function AssignmentDetails() {
         })
 
       if (uploadError) {
-        console.error('[PLAGIARISM] fileUploadError', uploadError)
-        throw uploadError
+        console.error('[UI SUBMIT] FILE_UPLOAD_FAILED', uploadError)
+        throw new Error(`File upload failed: ${uploadError.message}`)
       }
 
-      console.log('[PLAGIARISM] 11 submission_upload_finished', { filePath: fileName })
+      console.log('[UI SUBMIT] file upload success', { filePath: fileName })
 
       const filePath = fileName
       let currentSubmissionId = submission?.id
       let newVersionNumber = 1
       const submissionStatus = 'submitted'
 
-      console.log('[SUBMISSION] Inserting submission status:', { submissionStatus, plagiarismStatus: checkRes?.status })
-
       // Step 3: Insert / Update Submission Record
-      console.log('[PLAG] 9 submission insert', { assignmentId: assignment.id, studentId: profile.id, submissionStatus })
+      console.log('[UI SUBMIT] submission insert start', { assignmentId: assignment.id, studentId: profile.id, submissionStatus })
 
       if (!currentSubmissionId) {
         const { data: newSub, error: subError } = await supabase
@@ -310,20 +313,20 @@ export default function AssignmentDetails() {
             assignment_id: assignment.id,
             student_id: profile.id,
             status: submissionStatus,
-            similarity_score: checkRes.finalScore,
+            similarity_score: checkRes.finalScore ?? 0,
             current_version: 1
           })
           .select()
           .single()
 
         if (subError) {
-          console.error('[PLAG ERROR]', { stage: '9 submission insert', code: subError.code, message: subError.message })
-          throw subError
+          console.error('[UI SUBMIT] SUBMISSION_INSERT_FAILED', { code: subError.code, message: subError.message })
+          throw new Error(`Submission insert failed: ${subError.message}`)
         }
         currentSubmissionId = newSub.id
         setSubmission(newSub)
 
-        console.log('[PLAG] 10 submission inserted', { submissionId: currentSubmissionId })
+        console.log('[UI SUBMIT] submission insert success', { submissionId: currentSubmissionId })
 
         await createNotification(
           assignment.created_by,
@@ -344,19 +347,19 @@ export default function AssignmentDetails() {
           .from("submissions")
           .update({
             status: submissionStatus,
-            similarity_score: checkRes.finalScore,
+            similarity_score: checkRes.finalScore ?? 0,
             current_version: newVersionNumber,
             updated_at: new Date().toISOString()
           })
           .eq("id", currentSubmissionId)
 
         if (updateError) {
-          console.error('[PLAGIARISM] submissionUpdateError', { code: updateError.code, message: updateError.message })
-          throw updateError
+          console.error('[UI SUBMIT] SUBMISSION_UPDATE_FAILED', { code: updateError.code, message: updateError.message })
+          throw new Error(`Submission update failed: ${updateError.message}`)
         }
-        setSubmission({ ...submission, status: submissionStatus, similarity_score: checkRes.finalScore, current_version: newVersionNumber })
+        setSubmission({ ...submission, status: submissionStatus, similarity_score: checkRes.finalScore ?? 0, current_version: newVersionNumber })
 
-        console.log('[PLAGIARISM] 13 submission_insert_finished', { submissionId: currentSubmissionId, updateSuccess: true })
+        console.log('[UI SUBMIT] submission insert success', { submissionId: currentSubmissionId, updateSuccess: true })
 
         await createNotification(
           assignment.created_by,
@@ -386,23 +389,23 @@ export default function AssignmentDetails() {
         .select()
         .single()
 
-      if (verError) throw verError
+      if (verError) throw new Error(`Submission version insert failed: ${verError.message}`)
 
       // Step 5: Finalize Plagiarism Check Records
       setPlagiarismStep(6) // Finalizing plagiarism report
 
-      console.log('[PLAGIARISM] 14 finalize_request_started', { checkId: checkRes.checkId, submissionId: currentSubmissionId })
+      console.log('[UI SUBMIT] finalize start', { checkId: checkRes.checkId, submissionId: currentSubmissionId })
 
       const finalizeRes = await finalizePlagiarismCheck({
         checkId: checkRes.checkId,
         submissionId: currentSubmissionId,
         targetFeaturesData: checkRes.targetFeaturesData,
         matchesToInsert: checkRes.matchesToInsert,
-        finalScore: checkRes.finalScore,
+        finalScore: checkRes.finalScore ?? 0,
         status: checkRes.status
       })
 
-      console.log('[PLAGIARISM] 21 finalize_response_received', { httpStatus: 200, success: finalizeRes?.success !== false })
+      console.log('[UI SUBMIT] finalize success', { finalizeSuccess: finalizeRes?.success !== false })
 
       setVersions([newVersion, ...versions])
       setSelectedFile(null)
@@ -412,14 +415,14 @@ export default function AssignmentDetails() {
         status: checkRes.status || 'completed'
       })
 
-      console.log('[PLAGIARISM] 22 UI_success')
+      console.log('[UI SUBMIT] UI_success')
 
       if (checkRes.status === 'no_candidates') {
         toast.success("Originality check passed. No previous submissions were available for comparison.")
       } else if (checkRes.status === 'flagged') {
-        toast.warning(`Similarity detected: ${checkRes.finalScore}%. Your submission has been accepted but marked for professor review.`)
+        toast.warning(`Similarity detected: ${checkRes.finalScore ?? 0}%. Your submission has been accepted but marked for professor review.`)
       } else {
-        toast.success(`Originality Check Passed. Similarity: ${checkRes.finalScore}%. Assignment submitted successfully!`)
+        toast.success(`Originality Check Passed. Similarity: ${checkRes.finalScore ?? 0}%. Assignment submitted successfully!`)
       }
 
       triggerSubmissionNotification(currentSubmissionId).catch(err => {
@@ -427,7 +430,7 @@ export default function AssignmentDetails() {
       })
 
     } catch (error: any) {
-      console.error("[PLAGIARISM] uploadError", error)
+      console.error("[UI SUBMIT] uploadError", error)
       toast.error(error.message || "Unable to finalize originality check. Your assignment has not been submitted. Please try again.")
     } finally {
       setUploading(false)

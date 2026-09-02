@@ -44,6 +44,7 @@ self.addEventListener('fetch', (event) => {
     url.pathname.includes('/auth/v1/') ||
     url.pathname.includes('/functions/v1/') ||
     url.pathname.includes('/storage/v1/') ||
+    url.pathname.includes('/api/') ||
     url.pathname.includes('firebase-messaging-sw.js') ||
     event.request.headers.has('Authorization') ||
     event.request.method !== 'GET'
