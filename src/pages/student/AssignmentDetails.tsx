@@ -301,7 +301,7 @@ export default function AssignmentDetails() {
       console.log('[SUBMISSION] Inserting submission status:', { submissionStatus, plagiarismStatus: checkRes?.status })
 
       // Step 3: Insert / Update Submission Record
-      console.log('[PLAGIARISM] 12 submission_insert_started', { assignmentId: assignment.id, studentId: profile.id })
+      console.log('[PLAG] 9 submission insert', { assignmentId: assignment.id, studentId: profile.id, submissionStatus })
 
       if (!currentSubmissionId) {
         const { data: newSub, error: subError } = await supabase
@@ -317,13 +317,13 @@ export default function AssignmentDetails() {
           .single()
 
         if (subError) {
-          console.error('[PLAGIARISM] submissionInsertError', { code: subError.code, message: subError.message })
+          console.error('[PLAG ERROR]', { stage: '9 submission insert', code: subError.code, message: subError.message })
           throw subError
         }
         currentSubmissionId = newSub.id
         setSubmission(newSub)
 
-        console.log('[PLAGIARISM] 13 submission_insert_finished', { submissionId: currentSubmissionId, insertSuccess: true })
+        console.log('[PLAG] 10 submission inserted', { submissionId: currentSubmissionId })
 
         await createNotification(
           assignment.created_by,

@@ -63,30 +63,44 @@ export async function executePreSubmissionPlagiarismCheck({
   };
 
   // 3. Extract Raw Text
+  console.log('[PLAG] 3 file parsed', { fileName, fileSize: fileBuffer.length });
   let rawText = '';
   try {
     rawText = await extractRawText(fileBuffer, fileName);
   } catch (extractErr) {
-    console.error(`[PLAGIARISM ENGINE] Text extraction failed for ${fileName}:`, extractErr);
+    console.error('[PLAG ERROR]', {
+      stage: '4 text extracted',
+      name: extractErr?.name,
+      message: extractErr?.message,
+      code: 'TEXT_EXTRACTION_FAILED'
+    });
     return {
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'EXTRACTION_ERROR',
-      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX file.'
+      errorType: 'TEXT_EXTRACTION_FAILED',
+      errorCode: 'TEXT_EXTRACTION_FAILED',
+      message: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
 
   if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
-    console.error(`[PLAGIARISM ENGINE] Extracted text is empty for ${fileName}`);
+    console.error('[PLAG ERROR]', {
+      stage: '4 text extracted',
+      message: 'Extracted text is empty',
+      code: 'TEXT_EXTRACTION_FAILED'
+    });
     return {
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'EXTRACTION_ERROR',
-      message: 'Unable to extract readable text from this document. Please upload a searchable PDF or DOCX file.'
+      errorType: 'TEXT_EXTRACTION_FAILED',
+      errorCode: 'TEXT_EXTRACTION_FAILED',
+      message: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
+
+  console.log('[PLAG] 4 text extracted', { rawLength: rawText.length });
 
   // 4. Normalize Text Pipeline & Compute Hashes
   const templateText = assignment.template_text || null;
@@ -94,10 +108,7 @@ export async function executePreSubmissionPlagiarismCheck({
   const fileHash = computeFileHash(fileBuffer);
   const contentHash = computeContentHash(normData.normalizedFullText);
 
-  // Development-Safe Logging: Only first 8 chars of content hash
-  console.log('[PLAGIARISM] 02 extraction_and_hashes_complete', {
-    studentId,
-    assignmentId,
+  console.log('[PLAG] 5 hashes generated', {
     wordCount: normData.wordCount,
     normalizedTextLength: normData.normalizedFullText.length,
     contentHashPrefix: contentHash.substring(0, 8)
@@ -106,12 +117,18 @@ export async function executePreSubmissionPlagiarismCheck({
   // 5. Validate Minimum Word Count (Default >= 100 words)
   const wordVal = validateMinimumWordCount(normData.wordCount, 100);
   if (!wordVal.valid) {
+    console.error('[PLAG ERROR]', {
+      stage: '5 min word count',
+      message: wordVal.error,
+      code: 'INSUFFICIENT_CONTENT'
+    });
     return {
       success: false,
       allowed: false,
       status: 'failed',
       errorType: 'INSUFFICIENT_CONTENT',
-      message: wordVal.error
+      errorCode: 'INSUFFICIENT_CONTENT',
+      message: 'Unable to extract enough readable text from this document. Please upload a searchable PDF or DOCX file.'
     };
   }
 
@@ -126,7 +143,7 @@ export async function executePreSubmissionPlagiarismCheck({
   }
 
   // 7. Retrieve Candidate Document Features for SAME assignment_id (EXCLUDING current student)
-  console.log('[PLAGIARISM] 08 candidate_query_started', { assignmentId, excludingStudent: studentId });
+  console.log('[PLAG] 6 candidate query', { assignmentId, excludingStudent: studentId });
 
   const { data: candidates, error: candErr } = await supabaseClient
     .from('submission_document_features')
@@ -135,24 +152,24 @@ export async function executePreSubmissionPlagiarismCheck({
     .neq('student_id', studentId);
 
   if (candErr) {
-    console.error('[PLAGIARISM] 08_error candidate_query_failed', {
-      stage: 'candidate_query',
-      code: candErr.code,
-      message: candErr.message,
-      details: candErr.details
+    console.error('[PLAG ERROR]', {
+      stage: '6 candidate query',
+      name: candErr?.name,
+      message: candErr?.message,
+      code: candErr?.code
     });
     return {
       success: false,
       allowed: false,
       status: 'failed',
-      errorType: 'DATABASE_QUERY_ERROR',
-      errorCode: 'DATABASE_QUERY_ERROR',
+      errorType: 'CANDIDATE_QUERY_FAILED',
+      errorCode: 'CANDIDATE_QUERY_FAILED',
       message: 'Originality service is temporarily unavailable. Your assignment has not been submitted. Please try again shortly.'
     };
   }
 
   const candidateCount = candidates ? candidates.length : 0;
-  console.log('[PLAGIARISM] 09 candidate_query_completed', { candidateCount, excludingStudent: studentId });
+  console.log('[PLAG] 7 candidate query success', { candidateCount });
 
   // 8. Execute Plagiarism Engine
   const analysisResult = await runPlagiarismCheck({
@@ -166,6 +183,12 @@ export async function executePreSubmissionPlagiarismCheck({
     assignmentId: assignmentId,
     assignmentConfig: assignment,
     candidateFeatures: candidates || []
+  });
+
+  console.log('[PLAG] 8 similarity complete', {
+    status: analysisResult.status,
+    allowed: analysisResult.allowed,
+    finalScore: analysisResult.finalScore
   });
 
   const {

@@ -2,7 +2,10 @@ import { createClient } from '@supabase/supabase-js';
 import { finalizePlagiarismCheckRecords } from '../server/services/plagiarismService.js';
 
 function getServiceRoleKey() {
-  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY ||
+                 process.env.SUPABASE_SERVICE_KEY ||
+                 process.env.SUPABASE_SECRET_KEY ||
+                 process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
   if (!envKey) return null;
   return envKey;
 }
@@ -22,10 +25,14 @@ export default async function handler(req, res) {
 
   const { checkId, submissionId, targetFeaturesData, matchesToInsert, finalScore, status } = req.body || {};
 
-  console.log('[PLAGIARISM] 13 finalize_request_received', { checkId, submissionId, finalScore, status });
+  console.log('[PLAG] 11 finalize', { checkId, submissionId, finalScore, status });
 
   if (!submissionId) {
-    console.error('[PLAGIARISM] 13_error missing_submission_id');
+    console.error('[PLAG ERROR]', {
+      stage: '11 finalize',
+      message: 'submissionId is required',
+      code: 'VALIDATION_ERROR'
+    });
     return res.status(400).json({ success: false, errorCode: 'VALIDATION_ERROR', error: 'submissionId is required.' });
   }
 
@@ -33,7 +40,11 @@ export default async function handler(req, res) {
   const supabaseKey = getServiceRoleKey();
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error('[PLAGIARISM] 13_error missing_server_env', { hasSupabaseUrl: !!supabaseUrl, hasServiceRoleKey: !!supabaseKey });
+    console.error('[PLAG ERROR]', {
+      stage: '11 finalize env',
+      message: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY on server environment',
+      code: 'SERVER_CONFIG_ERROR'
+    });
     return res.status(500).json({ success: false, errorCode: 'SERVER_CONFIG_ERROR', error: 'Originality service is temporarily unavailable. Please try again shortly.' });
   }
 
@@ -54,6 +65,8 @@ export default async function handler(req, res) {
           supabaseClient: supabase
         });
 
+        console.log('[PLAG] 12 features persisted', { checkId, submissionId });
+
         if (finalScore !== undefined) {
           const { error: rptError } = await supabase.from('plagiarism_reports').upsert({
             submission_id: submissionId,
@@ -67,10 +80,8 @@ export default async function handler(req, res) {
           }, { onConflict: 'submission_id' });
 
           if (rptError) {
-            console.error('[PLAGIARISM] 14_error plagiarism_reports_upsert_failed', { errorCode: rptError.code, message: rptError.message });
+            console.error('[PLAG ERROR]', { stage: 'plagiarism_reports_upsert', code: rptError.code, message: rptError.message });
           }
-
-          console.log('[SUBMISSION] Finalizing submission status:', { submissionId, submissionStatus: 'submitted', plagiarismStatus: status });
 
           const { error: subUpdateError } = await supabase.from('submissions').update({
             similarity_score: finalScore,
@@ -79,21 +90,21 @@ export default async function handler(req, res) {
           }).eq('id', submissionId);
 
           if (subUpdateError) {
-            console.error('[PLAGIARISM] 14_error submissions_update_failed', { errorCode: subUpdateError.code, message: subUpdateError.message });
+            console.error('[PLAG ERROR]', { stage: 'submissions_update', code: subUpdateError.code, message: subUpdateError.message });
           }
         }
       })(),
       timeoutGuard
     ]);
 
-    console.log('[PLAGIARISM] 15 finalize_completed', { httpStatus: 200, checkId, submissionId });
     return res.status(200).json({ success: true, message: 'Plagiarism check records finalized successfully.' });
   } catch (err) {
-    console.error('[PLAGIARISM] 15_error finalize_uncaught_exception', {
-      stage: 'finalize_handler',
-      errorMessage: err.message,
-      errorCode: err.code || 'FINALIZATION_ERROR'
+    console.error('[PLAG ERROR]', {
+      stage: 'finalize_uncaught_exception',
+      name: err?.name,
+      message: err?.message,
+      code: err?.code || 'FINALIZE_FAILED'
     });
-    return res.status(500).json({ success: false, errorCode: 'FINALIZATION_ERROR', error: err.message || 'Failed to finalize plagiarism check.' });
+    return res.status(500).json({ success: false, errorCode: 'FINALIZE_FAILED', error: err.message || 'Failed to finalize plagiarism check.' });
   }
 }
