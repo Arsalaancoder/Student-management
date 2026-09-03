@@ -29,8 +29,8 @@ export default async function handler(req, res) {
 
   console.log("[PLAG DEPLOYMENT FINALIZE]", "env-debug-v1");
 
-  const rawSupabaseUrl = process.env.SUPABASE_URL;
-  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const rawSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
   const supabaseUrl = typeof rawSupabaseUrl === "string" ? rawSupabaseUrl.trim() : "";
   const serviceRoleKey = typeof rawServiceRoleKey === "string" ? rawServiceRoleKey.trim() : "";

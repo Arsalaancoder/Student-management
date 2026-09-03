@@ -244,49 +244,24 @@ export default function AssignmentDetails() {
   const handleUpload = async () => {
     if (!selectedFile || !profile || !assignment) return
 
+    let currentSubmissionId = submission?.id
+    let newVersionNumber = 1
+    let filePath = ''
+
     try {
       setUploading(true)
       setPlagiarismChecking(true)
-      setPlagiarismStep(1) // File validated (01)
+      setPlagiarismStep(1) // Uploading file
       setPlagiarismBlockedResult(null)
 
-      // Step 1: Pre-Submission Plagiarism Check (02-07 execute on server)
-      console.log('[UI SUBMIT] presubmit start', { assignmentId: assignment.id, studentId: profile.id, fileName: selectedFile.name, fileSize: selectedFile.size })
-
-      const checkRes = await checkPlagiarismPreSubmission(selectedFile, assignment.id, profile.id)
-
-      console.log('[UI SUBMIT] presubmit response:', { allowed: checkRes?.allowed, status: checkRes?.status, score: checkRes?.finalScore, success: checkRes?.success })
-
-      const isAllowedStatus = checkRes?.allowed === true && (checkRes?.status === 'passed' || checkRes?.status === 'no_candidates' || checkRes?.status === 'flagged');
-
-      if (!isAllowedStatus || checkRes?.status === 'blocked' || checkRes?.status === 'failed' || checkRes?.success === false) {
-        setPlagiarismChecking(false)
-        setUploading(false)
-        if (checkRes?.status === 'failed' || checkRes?.success === false) {
-          console.error('[UI SUBMIT] PRESUBMIT_FAILED', { errorCode: checkRes?.errorCode, message: checkRes?.message })
-          toast.error(checkRes?.message || "Plagiarism check failed. Submission prevented.")
-          return
-        }
-        setPlagiarismBlockedResult({
-          similarity: checkRes?.finalScore ?? checkRes?.similarity ?? 0,
-          message: checkRes?.message || "Significant similarity was found with an existing submission. Please revise your work and submit again."
-        })
-        return
-      }
-
-      console.log('[UI SUBMIT] presubmit success')
-
-      // Pre-check passed: set UI progress to similarity complete (Step 5)
-      setPlagiarismStep(5)
-
-      // Step 2: Upload File to Storage (Allowed PASS or FLAG)
-      console.log('[UI SUBMIT] file upload start')
+      // Step 1: Upload File to Storage FIRST
+      console.log('[UI SUBMIT] Step 1: Storage upload start', { fileName: selectedFile.name, fileSize: selectedFile.size })
       const fileExt = selectedFile.name.split('.').pop()
-      const fileName = `${profile.id}/${assignment.id}/${Date.now()}.${fileExt}`
+      const storagePath = `${profile.id}/${assignment.id}/${Date.now()}.${fileExt}`
 
       const { error: uploadError } = await supabase.storage
         .from('submissions')
-        .upload(fileName, selectedFile, {
+        .upload(storagePath, selectedFile, {
           cacheControl: '3600',
           upsert: false
         })
@@ -296,15 +271,13 @@ export default function AssignmentDetails() {
         throw new Error(`File upload failed: ${uploadError.message}`)
       }
 
-      console.log('[UI SUBMIT] file upload success', { filePath: fileName })
+      filePath = storagePath
+      console.log('[UI SUBMIT] Step 1: Storage upload success', { filePath })
 
-      const filePath = fileName
-      let currentSubmissionId = submission?.id
-      let newVersionNumber = 1
-      const submissionStatus = 'submitted'
+      setPlagiarismStep(2) // Saving submission record
 
-      // Step 3: Insert / Update Submission Record
-      console.log('[UI SUBMIT] submission insert start', { assignmentId: assignment.id, studentId: profile.id, submissionStatus })
+      // Step 2: Save Submission Record to Supabase DB FIRST
+      console.log('[UI SUBMIT] Step 2: DB submission insert/update start')
 
       if (!currentSubmissionId) {
         const { data: newSub, error: subError } = await supabase
@@ -312,8 +285,8 @@ export default function AssignmentDetails() {
           .insert({
             assignment_id: assignment.id,
             student_id: profile.id,
-            status: submissionStatus,
-            similarity_score: checkRes.finalScore ?? 0,
+            status: 'submitted',
+            similarity_score: 0,
             current_version: 1
           })
           .select()
@@ -321,33 +294,32 @@ export default function AssignmentDetails() {
 
         if (subError) {
           console.error('[UI SUBMIT] SUBMISSION_INSERT_FAILED', { code: subError.code, message: subError.message })
-          throw new Error(`Submission insert failed: ${subError.message}`)
+          throw new Error(`Submission record creation failed: ${subError.message}`)
         }
         currentSubmissionId = newSub.id
         setSubmission(newSub)
 
-        console.log('[UI SUBMIT] submission insert success', { submissionId: currentSubmissionId })
+        console.log('[UI SUBMIT] Step 2: DB submission insert success', { submissionId: currentSubmissionId })
 
         await createNotification(
           assignment.created_by,
           "New Submission",
           `${profile.full_name} has submitted ${assignment.title}.`,
           "new_submission"
-        )
+        ).catch(err => console.warn("Notification warning:", err))
 
         await createNotification(
           profile.id,
           "Submission Confirmed",
           `Your work for ${assignment.title} has been successfully submitted.`,
           "submission_confirmation"
-        )
+        ).catch(err => console.warn("Notification warning:", err))
       } else {
         newVersionNumber = (submission.current_version || 1) + 1
         const { error: updateError } = await supabase
           .from("submissions")
           .update({
-            status: submissionStatus,
-            similarity_score: checkRes.finalScore ?? 0,
+            status: 'submitted',
             current_version: newVersionNumber,
             updated_at: new Date().toISOString()
           })
@@ -357,26 +329,24 @@ export default function AssignmentDetails() {
           console.error('[UI SUBMIT] SUBMISSION_UPDATE_FAILED', { code: updateError.code, message: updateError.message })
           throw new Error(`Submission update failed: ${updateError.message}`)
         }
-        setSubmission({ ...submission, status: submissionStatus, similarity_score: checkRes.finalScore ?? 0, current_version: newVersionNumber })
-
-        console.log('[UI SUBMIT] submission insert success', { submissionId: currentSubmissionId, updateSuccess: true })
+        setSubmission({ ...submission, status: 'submitted', current_version: newVersionNumber })
 
         await createNotification(
           assignment.created_by,
           "Resubmission",
           `${profile.full_name} has resubmitted ${assignment.title}.`,
           "resubmission"
-        )
+        ).catch(err => console.warn("Notification warning:", err))
 
         await createNotification(
           profile.id,
           "Resubmission Confirmed",
           `Your updated work for ${assignment.title} has been successfully submitted.`,
           "submission_confirmation"
-        )
+        ).catch(err => console.warn("Notification warning:", err))
       }
 
-      // Step 4: Create Submission Version
+      // Step 3: Insert Submission Version Record
       const { data: newVersion, error: verError } = await supabase
         .from("submission_versions")
         .insert({
@@ -389,51 +359,71 @@ export default function AssignmentDetails() {
         .select()
         .single()
 
-      if (verError) throw new Error(`Submission version insert failed: ${verError.message}`)
+      if (verError) throw new Error(`Submission version record failed: ${verError.message}`)
 
-      // Step 5: Finalize Plagiarism Check Records
-      setPlagiarismStep(6) // Finalizing plagiarism report
-
-      console.log('[UI SUBMIT] finalize start', { checkId: checkRes.checkId, submissionId: currentSubmissionId })
-
-      const finalizeRes = await finalizePlagiarismCheck({
-        checkId: checkRes.checkId,
-        submissionId: currentSubmissionId,
-        targetFeaturesData: checkRes.targetFeaturesData,
-        matchesToInsert: checkRes.matchesToInsert,
-        finalScore: checkRes.finalScore ?? 0,
-        status: checkRes.status
-      })
-
-      console.log('[UI SUBMIT] finalize success', { finalizeSuccess: finalizeRes?.success !== false })
-
-      setVersions([newVersion, ...versions])
+      setVersions(prev => [newVersion, ...prev])
       setSelectedFile(null)
-      setSimilarityReport({
-        submission_id: currentSubmissionId,
-        similarity_percentage: checkRes.finalScore ?? 0,
-        status: checkRes.status || 'completed'
-      })
 
-      console.log('[UI SUBMIT] UI_success')
-
-      if (checkRes.status === 'no_candidates') {
-        toast.success("Originality check passed. No previous submissions were available for comparison.")
-      } else if (checkRes.status === 'flagged') {
-        toast.warning(`Similarity detected: ${checkRes.finalScore ?? 0}%. Your submission has been accepted but marked for professor review.`)
-      } else {
-        toast.success(`Originality Check Passed. Similarity: ${checkRes.finalScore ?? 0}%. Assignment submitted successfully!`)
-      }
+      // AT THIS POINT, SUBMISSION IS 100% STORED AND SUBMITTED
+      toast.success("Assignment submitted successfully!")
 
       triggerSubmissionNotification(currentSubmissionId).catch(err => {
         console.warn("FCM push warning:", err)
       })
 
     } catch (error: any) {
-      console.error("[UI SUBMIT] uploadError", error)
-      toast.error(error.message || "Unable to finalize originality check. Your assignment has not been submitted. Please try again.")
+      console.error("[UI SUBMIT] Upload & submission error", error)
+      toast.error(error.message || "Failed to submit assignment. Please try again.")
+      setUploading(false)
+      setPlagiarismChecking(false)
+      return
     } finally {
       setUploading(false)
+    }
+
+    // Step 4: Run Originality Check Separately (Non-blocking / Async)
+    try {
+      setPlagiarismStep(3) // Originality scan running
+      console.log('[UI SUBMIT] Step 4: Triggering async similarity check', { submissionId: currentSubmissionId })
+
+      const simRes = await triggerSimilarityCheck(currentSubmissionId)
+
+      console.log('[UI SUBMIT] Step 4: Similarity check response', simRes)
+
+      if (simRes && simRes.success) {
+        setPlagiarismStep(4)
+        setSimilarityReport({
+          submission_id: currentSubmissionId,
+          similarity_percentage: simRes.similarity ?? 0,
+          status: simRes.status || 'completed'
+        })
+        if (simRes.status === 'flagged') {
+          toast.warning(`Similarity detected: ${simRes.similarity}%. Marked for professor review.`)
+        } else if (simRes.status === 'blocked') {
+          toast.error(`High similarity detected (${simRes.similarity}%). Flagged for professor review.`)
+        } else if (simRes.status === 'no_candidates') {
+          toast.info("Originality check completed (no previous submissions to compare).")
+        } else {
+          toast.success(`Originality check passed (${simRes.similarity}% similarity).`)
+        }
+      } else {
+        console.warn('[UI SUBMIT] Originality check unavailable or failed:', simRes?.error)
+        setSimilarityReport({
+          submission_id: currentSubmissionId,
+          similarity_percentage: null,
+          status: 'failed'
+        })
+        toast.info("Originality service is temporarily unavailable. Your assignment is submitted and will be scanned later.")
+      }
+    } catch (simErr: any) {
+      console.warn('[UI SUBMIT] Originality check background exception:', simErr?.message)
+      setSimilarityReport({
+        submission_id: currentSubmissionId,
+        similarity_percentage: null,
+        status: 'failed'
+      })
+      toast.info("Originality service is temporarily unavailable. Your assignment is submitted and will be scanned later.")
+    } finally {
       setPlagiarismChecking(false)
     }
   }
@@ -597,29 +587,17 @@ export default function AssignmentDetails() {
                         </div>
 
                         <div className="space-y-3 bg-slate-50 p-6 rounded-2xl border border-slate-100 text-sm">
-                          <div className="flex items-center gap-3 font-semibold text-emerald-700">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                            <span>File validated</span>
+                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 1 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                            {plagiarismStep >= 1 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
+                            <span>Uploading document to secure storage</span>
                           </div>
                           <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 2 ? 'text-emerald-700' : 'text-slate-400'}`}>
                             {plagiarismStep >= 2 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
-                            <span>Text extracted</span>
+                            <span>Saving assignment submission</span>
                           </div>
                           <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 3 ? 'text-emerald-700' : 'text-slate-400'}`}>
                             {plagiarismStep >= 3 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
-                            <span>Comparing with previous submissions</span>
-                          </div>
-                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 4 ? 'text-emerald-700' : 'text-slate-400'}`}>
-                            {plagiarismStep >= 4 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
-                            <span>Checking phrase similarity</span>
-                          </div>
-                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 5 ? 'text-emerald-700' : 'text-slate-400'}`}>
-                            {plagiarismStep >= 5 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0" />}
-                            <span>Checking semantic similarity</span>
-                          </div>
-                          <div className={`flex items-center gap-3 font-semibold ${plagiarismStep >= 6 ? 'text-emerald-700' : 'text-slate-400'}`}>
-                            {plagiarismStep >= 6 ? <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" /> : <Clock className="h-4 w-4 text-slate-400 shrink-0 animate-pulse" />}
-                            <span>Finalizing plagiarism report</span>
+                            <span>Performing originality scan</span>
                           </div>
                         </div>
                       </Card>

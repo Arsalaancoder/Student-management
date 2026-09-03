@@ -35,8 +35,8 @@ export default async function handler(req, res) {
 
   console.log("[PLAG DEPLOYMENT]", "env-check-v2");
 
-  const rawSupabaseUrl = process.env.SUPABASE_URL;
-  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const rawSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const rawServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
   const supabaseUrl = typeof rawSupabaseUrl === "string" ? rawSupabaseUrl.trim() : "";
   const serviceRoleKey = typeof rawServiceRoleKey === "string" ? rawServiceRoleKey.trim() : "";
@@ -44,16 +44,10 @@ export default async function handler(req, res) {
   console.log("[PLAG ENV CHECK]", {
     deployment: "env-check-v2",
     vercelEnv: process.env.VERCEL_ENV || "unknown",
-    hasSupabaseUrl:
-      typeof process.env.SUPABASE_URL === "string" &&
-      process.env.SUPABASE_URL.trim().length > 0,
-    hasServiceRoleKey:
-      typeof process.env.SUPABASE_SERVICE_ROLE_KEY === "string" &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY.trim().length > 0,
-    supabaseUrlLength:
-      process.env.SUPABASE_URL?.trim().length || 0,
-    serviceRoleKeyLength:
-      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim().length || 0
+    hasSupabaseUrl: Boolean(supabaseUrl),
+    hasServiceRoleKey: Boolean(serviceRoleKey),
+    supabaseUrlLength: supabaseUrl.length,
+    serviceRoleKeyLength: serviceRoleKey.length
   });
 
   if (!supabaseUrl || !serviceRoleKey) {
