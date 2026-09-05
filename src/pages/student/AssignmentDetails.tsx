@@ -70,19 +70,28 @@ export default function AssignmentDetails() {
 
         setAssignment(assignmentData)
 
-        // Fetch signed URL for faculty assignment file if attached
-        if (assignmentData?.assignment_file_path) {
-          supabase.storage
-            .from("assignments")
-            .createSignedUrl(assignmentData.assignment_file_path, 3600)
-            .then(({ data: signedData, error: signedErr }) => {
-              if (!signedErr && signedData?.signedUrl) {
-                setAssignmentFileUrl(signedData.signedUrl)
-              } else {
-                console.warn("Could not generate signed URL for assignment file:", signedErr)
-              }
-            })
-            .catch(err => console.error("Error creating signed URL:", err))
+        // Fetch signed/public URL for faculty assignment file if attached
+        const facultyPath = assignmentData?.assignment_file_path || assignmentData?.file_url || assignmentData?.attachment_url || assignmentData?.pdf_url || assignmentData?.assignment_file
+        if (facultyPath) {
+          if (facultyPath.startsWith("http://") || facultyPath.startsWith("https://")) {
+            setAssignmentFileUrl(facultyPath)
+          } else {
+            // Get public URL
+            const { data: pubData } = supabase.storage.from("assignments").getPublicUrl(facultyPath)
+            if (pubData?.publicUrl) {
+              setAssignmentFileUrl(pubData.publicUrl)
+            }
+            // Also generate signed URL (valid for 24h)
+            supabase.storage
+              .from("assignments")
+              .createSignedUrl(facultyPath, 86400)
+              .then(({ data: signedData, error: signedErr }) => {
+                if (!signedErr && signedData?.signedUrl) {
+                  setAssignmentFileUrl(signedData.signedUrl)
+                }
+              })
+              .catch(err => console.error("Error creating signed URL for assignment file:", err))
+          }
         }
 
         // 2. Fetch student's submission
@@ -471,6 +480,32 @@ export default function AssignmentDetails() {
     }
   }
 
+  const handleDownloadFacultyFile = async () => {
+    const fileUrl = assignmentFileUrl || (assignment?.assignment_file_path || assignment?.file_url || assignment?.attachment_url || assignment?.pdf_url || assignment?.assignment_file)
+    if (!fileUrl) {
+      toast.error("File URL is not available.")
+      return
+    }
+    try {
+      const response = await fetch(fileUrl)
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = blobUrl
+      const rawPath = assignment?.assignment_file_path || assignment?.file_url || assignment?.attachment_url || "assignment_questions.pdf"
+      const fileName = rawPath.split("/").pop() || "assignment_questions.pdf"
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+      toast.success("Attachment download started!")
+    } catch (err) {
+      console.warn("Direct blob download failed, opening URL in new window:", err)
+      window.open(fileUrl, "_blank")
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto pb-10">
@@ -574,15 +609,20 @@ export default function AssignmentDetails() {
               )}
 
               {/* Faculty Attached Assignment PDF / Question Paper */}
-              {assignment.assignment_file_path && (
-                <div className="mt-6 border-2 border-indigo-100 bg-indigo-50/60 rounded-2xl p-6 space-y-4">
+              {(assignment.assignment_file_path || assignment.file_url || assignment.attachment_url || assignment.pdf_url || assignment.assignment_file) && (
+                <div className="mt-6 border-2 border-indigo-200 bg-gradient-to-r from-indigo-50/90 to-blue-50/90 rounded-2xl p-6 space-y-4 shadow-sm">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-3.5">
-                      <div className="h-12 w-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                      <div className="h-12 w-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
                         <FileText className="h-6 w-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-slate-900 text-base">Faculty Assignment PDF / Question Paper</h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-slate-900 text-base">Faculty Assignment Question Paper</h4>
+                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider">
+                            Attachment
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-600 mt-0.5">Attached document containing questions and assignment guidelines</p>
                       </div>
                     </div>
@@ -593,38 +633,48 @@ export default function AssignmentDetails() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="rounded-xl border-indigo-300 text-indigo-800 hover:bg-indigo-100 gap-2 font-bold text-xs"
+                            className="rounded-xl border-indigo-300 text-indigo-800 hover:bg-indigo-100 gap-2 font-bold text-xs h-9"
                             onClick={() => setShowFacultyPdfPreview(!showFacultyPdfPreview)}
                           >
                             <Eye className="h-4 w-4 text-indigo-600" />
                             {showFacultyPdfPreview ? "Hide Questions PDF" : "View Questions PDF"}
                           </Button>
-                          <a 
-                            href={assignmentFileUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            download
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-xs font-bold transition-colors shadow-sm"
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white gap-2 font-bold text-xs h-9 shadow-sm"
+                            onClick={handleDownloadFacultyFile}
                           >
                             <Download className="h-4 w-4" />
                             Download Attachment
-                          </a>
+                          </Button>
                         </>
                       ) : (
                         <div className="text-xs font-semibold text-slate-500 flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" /> Loading file...
+                          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" /> Loading attachment...
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Faculty PDF Viewer */}
+                  {/* Faculty PDF Inline Viewer */}
                   {showFacultyPdfPreview && assignmentFileUrl && (
-                    <div className="mt-4 pt-4 border-t border-indigo-200 animate-in fade-in">
-                      <div className="max-h-[600px] overflow-y-auto rounded-xl border border-slate-300 bg-slate-100 p-2 shadow-inner">
+                    <div className="mt-4 pt-4 border-t border-indigo-200 animate-in fade-in space-y-3">
+                      <div className="flex items-center justify-between text-xs font-semibold text-slate-600 px-1">
+                        <span>Assignment Question Document Preview</span>
+                        <a 
+                          href={assignmentFileUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-indigo-600 hover:underline flex items-center gap-1 font-bold"
+                        >
+                          Open in Full Window &rarr;
+                        </a>
+                      </div>
+                      <div className="h-[600px] w-full rounded-2xl border border-slate-300 bg-slate-100 overflow-hidden shadow-inner">
                         <iframe 
                           src={`${assignmentFileUrl}#toolbar=1`} 
-                          className="w-full h-[550px] rounded-lg border-none"
+                          className="w-full h-full border-none"
                           title="Faculty Assignment Questions Document"
                         />
                       </div>
@@ -707,6 +757,8 @@ export default function AssignmentDetails() {
                           Revise Document & Try Again
                         </Button>
                       </div>
+                    </div>
+                  )}
                   {/* Existing Submission Banner */}
                   {hasSubmitted && (
                     <div className="bg-blue-50/80 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-blue-900">
