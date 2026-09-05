@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext"
 import { supabase } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, UploadCloud, FileText, CheckCircle, Clock, Calendar, AlertCircle, FileCheck, CheckCircle2, Search, X, Loader2, Sparkles, Wand2, TrendingUp, AlertTriangle, ShieldAlert, File } from "lucide-react"
+import { ArrowLeft, UploadCloud, FileText, CheckCircle, Clock, Calendar, AlertCircle, FileCheck, CheckCircle2, Search, X, Loader2, Sparkles, Wand2, TrendingUp, AlertTriangle, ShieldAlert, File, Download, Eye } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -36,6 +36,8 @@ export default function AssignmentDetails() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isReviewed, setIsReviewed] = useState(false)
   const [isPdfValid, setIsPdfValid] = useState(false)
+  const [assignmentFileUrl, setAssignmentFileUrl] = useState<string | null>(null)
+  const [showFacultyPdfPreview, setShowFacultyPdfPreview] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -67,6 +69,21 @@ export default function AssignmentDetails() {
         }
 
         setAssignment(assignmentData)
+
+        // Fetch signed URL for faculty assignment file if attached
+        if (assignmentData?.assignment_file_path) {
+          supabase.storage
+            .from("assignments")
+            .createSignedUrl(assignmentData.assignment_file_path, 3600)
+            .then(({ data: signedData, error: signedErr }) => {
+              if (!signedErr && signedData?.signedUrl) {
+                setAssignmentFileUrl(signedData.signedUrl)
+              } else {
+                console.warn("Could not generate signed URL for assignment file:", signedErr)
+              }
+            })
+            .catch(err => console.error("Error creating signed URL:", err))
+        }
 
         // 2. Fetch student's submission
         const { data: submissionData } = await supabase
@@ -489,9 +506,9 @@ export default function AssignmentDetails() {
 
   const isOverdue = new Date(assignment.deadline).getTime() < new Date().getTime()
   const isReturned = submission?.status === 'returned'
-  const isSubmittedOrLater = submission && submission.status !== 'draft' && submission.status !== 'not_started' && submission.status !== 'returned'
-  const hasSubmitted = !!submission
-  const canSubmit = !isSubmittedOrLater && (!isOverdue || isReturned)
+  const isGraded = !!grade
+  const hasSubmitted = !!submission && submission.status !== 'draft' && submission.status !== 'not_started'
+  const canSubmit = !isGraded && (!isOverdue || isReturned)
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10 max-w-5xl mx-auto">
@@ -553,6 +570,66 @@ export default function AssignmentDetails() {
                   <p className="whitespace-pre-wrap text-slate-600 text-sm">
                     {assignment.instructions}
                   </p>
+                </div>
+              )}
+
+              {/* Faculty Attached Assignment PDF / Question Paper */}
+              {assignment.assignment_file_path && (
+                <div className="mt-6 border-2 border-indigo-100 bg-indigo-50/60 rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="h-12 w-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                        <FileText className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-base">Faculty Assignment PDF / Question Paper</h4>
+                        <p className="text-xs text-slate-600 mt-0.5">Attached document containing questions and assignment guidelines</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {assignmentFileUrl ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl border-indigo-300 text-indigo-800 hover:bg-indigo-100 gap-2 font-bold text-xs"
+                            onClick={() => setShowFacultyPdfPreview(!showFacultyPdfPreview)}
+                          >
+                            <Eye className="h-4 w-4 text-indigo-600" />
+                            {showFacultyPdfPreview ? "Hide Questions PDF" : "View Questions PDF"}
+                          </Button>
+                          <a 
+                            href={assignmentFileUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            download
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-xs font-bold transition-colors shadow-sm"
+                          >
+                            <Download className="h-4 w-4" />
+                            Download Attachment
+                          </a>
+                        </>
+                      ) : (
+                        <div className="text-xs font-semibold text-slate-500 flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin text-indigo-600" /> Loading file...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Faculty PDF Viewer */}
+                  {showFacultyPdfPreview && assignmentFileUrl && (
+                    <div className="mt-4 pt-4 border-t border-indigo-200 animate-in fade-in">
+                      <div className="max-h-[600px] overflow-y-auto rounded-xl border border-slate-300 bg-slate-100 p-2 shadow-inner">
+                        <iframe 
+                          src={`${assignmentFileUrl}#toolbar=1`} 
+                          className="w-full h-[550px] rounded-lg border-none"
+                          title="Faculty Assignment Questions Document"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -630,6 +707,19 @@ export default function AssignmentDetails() {
                           Revise Document & Try Again
                         </Button>
                       </div>
+                  {/* Existing Submission Banner */}
+                  {hasSubmitted && (
+                    <div className="bg-blue-50/80 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-blue-900">
+                      <div className="flex items-center gap-3">
+                        <CheckCircle2 className="h-5 w-5 text-blue-600 shrink-0" />
+                        <div>
+                          <h4 className="font-bold text-sm">Active Submission Recorded (Version v{submission.current_version})</h4>
+                          <p className="text-xs text-blue-700">Status: <span className="font-bold capitalize">{submission.status.replace("_", " ")}</span></p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-blue-700 bg-blue-100 px-3 py-1 rounded-full shrink-0">
+                        You can upload an updated version below
+                      </span>
                     </div>
                   )}
 
