@@ -17,6 +17,8 @@ import { triggerSimilarityCheck, checkPlagiarismPreSubmission, finalizePlagiaris
 import { PLAGIARISM_CONFIG } from "@/lib/plagiarismConfig"
 import { triggerSubmissionNotification } from "@/lib/fcm"
 
+import PDFPreview from "@/components/PDFPreview"
+
 export default function AssignmentDetails() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -32,6 +34,8 @@ export default function AssignmentDetails() {
   
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [isReviewed, setIsReviewed] = useState(false)
+  const [isPdfValid, setIsPdfValid] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -218,6 +222,8 @@ export default function AssignmentDetails() {
     setPlagiarismBlockedResult(null)
     setPlagiarismChecking(false)
     setPlagiarismStep(0)
+    setIsReviewed(false)
+    setIsPdfValid(false)
 
     // 15MB limit to optimize Supabase Storage bandwidth
     if (file.size > 15 * 1024 * 1024) {
@@ -629,8 +635,8 @@ export default function AssignmentDetails() {
 
                   {/* Upload Zone */}
                   <div 
-                    className={`relative border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center transition-all ${
-                      dragActive ? "border-primary bg-primary/5 scale-[1.02]" : "border-slate-200 hover:border-primary/50 hover:bg-slate-50"
+                    className={`relative border-2 border-dashed rounded-3xl p-6 sm:p-8 flex flex-col transition-all ${
+                      dragActive ? "border-primary bg-primary/5 scale-[1.01]" : "border-slate-200"
                     }`}
                     onDragEnter={handleDrag}
                     onDragLeave={handleDrag}
@@ -641,47 +647,90 @@ export default function AssignmentDetails() {
                       type="file" 
                       ref={fileInputRef} 
                       className="hidden" 
+                      accept=".pdf,application/pdf"
                       onChange={handleChange}
                     />
                     
                     {selectedFile ? (
-                      <div className="flex flex-col items-center text-center">
-                        <div className="h-16 w-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-                          <File className="h-8 w-8" />
-                        </div>
-                        <p className="font-bold text-slate-900">{selectedFile.name}</p>
-                        <p className="text-sm text-slate-500 mt-1">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                      <div className="w-full space-y-6 text-left">
+                        {/* PDF Preview Component */}
+                        <PDFPreview
+                          file={selectedFile}
+                          onChangeFile={() => fileInputRef.current?.click()}
+                          onRemoveFile={() => {
+                            setSelectedFile(null)
+                            setIsReviewed(false)
+                            setIsPdfValid(false)
+                            if (fileInputRef.current) fileInputRef.current.value = ""
+                          }}
+                          onValidationChange={(isValid) => setIsPdfValid(isValid)}
+                        />
+
+                        {/* Confirmation Checkbox */}
+                        {isPdfValid && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-start gap-3.5 animate-in fade-in">
+                            <input 
+                              type="checkbox" 
+                              id="review-confirmation-checkbox" 
+                              checked={isReviewed}
+                              disabled={uploading}
+                              onChange={(e) => setIsReviewed(e.target.checked)}
+                              className="mt-0.5 h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600 shrink-0"
+                            />
+                            <label 
+                              htmlFor="review-confirmation-checkbox" 
+                              className="text-sm font-semibold text-slate-800 cursor-pointer select-none leading-tight"
+                            >
+                              I have reviewed this PDF and confirm this is the correct assignment.
+                            </label>
+                          </div>
+                        )}
                         
-                        <div className="flex flex-wrap gap-3 mt-6 justify-center">
-                          <Button variant="outline" className="rounded-full" onClick={() => setSelectedFile(null)} disabled={uploading}>
-                            Cancel
+                        {/* Submit & Action Buttons */}
+                        <div className="flex flex-wrap gap-3 pt-2 justify-end">
+                          <Button 
+                            type="button"
+                            variant="outline" 
+                            className="rounded-full border-indigo-200 text-indigo-700 hover:bg-indigo-50 gap-2" 
+                            onClick={handleReviewWork} 
+                            disabled={uploading || aiReviewLoading || !isPdfValid}
+                          >
+                            <Sparkles className="h-4 w-4" /> Review My Work with AI
                           </Button>
-                          <Button variant="outline" className="rounded-full border-indigo-200 text-indigo-700 hover:bg-indigo-50 gap-2" onClick={handleReviewWork} disabled={uploading || aiReviewLoading}>
-                            <Sparkles className="h-4 w-4" /> Review My Work
-                          </Button>
-                          <Button className="rounded-full px-8 bg-[#1E5EFF] hover:bg-blue-700 font-bold" onClick={handleUpload} disabled={uploading}>
-                            {uploading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Checking & Submitting...</> : 'Check & Submit'}
+                          <Button 
+                            type="button"
+                            className="rounded-full px-8 bg-[#1E5EFF] hover:bg-blue-700 font-bold shadow-md disabled:opacity-50 disabled:cursor-not-allowed" 
+                            onClick={handleUpload} 
+                            disabled={uploading || !isPdfValid || !isReviewed}
+                          >
+                            {uploading ? (
+                              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Checking & Submitting...</>
+                            ) : (
+                              'Confirm & Submit Assignment'
+                            )}
                           </Button>
                         </div>
-                        <div className="w-full mt-6 text-left">
+
+                        {/* AI Review Panel */}
+                        <div className="w-full text-left">
                           <AIPanel 
                             title="Pre-submission Review"
                             content={aiReviewContent} 
                             loading={aiReviewLoading} 
                             error={aiReviewError} 
-                            onClose={() => {setAiReviewContent(null); setAiReviewError(null)}}
+                            onClose={() => {setAiExplainContent(null); setAiReviewError(null)}}
                             onRegenerate={handleReviewWork}
                           />
                         </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center text-center cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                      <div className="flex flex-col items-center text-center cursor-pointer py-6" onClick={() => fileInputRef.current?.click()}>
                         <div className="h-16 w-16 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                           <UploadCloud className="h-8 w-8" />
                         </div>
-                        <h3 className="font-bold text-lg text-slate-900 mb-2">Click to upload or drag & drop</h3>
+                        <h3 className="font-bold text-lg text-slate-900 mb-2">Click to upload or drag & drop PDF</h3>
                         <p className="text-sm text-slate-500 max-w-xs mb-2">
-                          Maximum size: 50MB.
+                          Select a PDF assignment to preview before submitting (Max 15MB).
                         </p>
                         {assignment.allowed_file_types && assignment.allowed_file_types.length > 0 && (
                           <div className="flex flex-wrap gap-2 justify-center mt-2">
